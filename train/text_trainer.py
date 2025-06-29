@@ -57,7 +57,7 @@ def train_text_mode(args):
 
     noise_scheduler.set_timesteps(num_inference_steps)
 
-    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method)
+    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr))
     if args.lora_init_method is not None:
         lora_save_path = os.path.join(save_path, "lora")
         os.makedirs(lora_save_path, exist_ok=True)
@@ -104,14 +104,10 @@ def train_text_mode(args):
         if (idx + 1) % args.save_iter == 0:
             if args.lora_init_method is not None:
                 save_model(lora_modules, lora_save_path, idx+1, model_name='lora')
-                print(f"[Checkpoint] Saved LoRA at iteration {idx + 1}")
-                # Save remained UNet
                 save_model(unet, lora_save_path, idx+1, model_name='remained_unet')
-                print(f"[Checkpoint] Saved remained UNet at iteration {idx + 1}")
-                # Merge LoRA into UNet and save merged weights
                 merged_unet = merge_lora_to_unet(unet, lora_modules)
                 save_model(merged_unet, lora_save_path, idx+1, model_name='merged_unet')
-                print(f"[Checkpoint] Saved merged UNet at iteration {idx + 1}")
+                print(f"[Checkpoint] Saved model at iteration {idx + 1}")
             else:
                 save_model(unet, unet_save_path, idx+1, model_name='unet')
                 print(f"[Checkpoint] Saved at iteration {idx + 1}")
