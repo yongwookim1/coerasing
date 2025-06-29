@@ -132,30 +132,28 @@ def compute_fisher_information(unet, prompt, module_names, tokenizer, text_encod
     fisher_info = {name: torch.zeros_like(dict(unet.named_modules())[name].weight) for name in module_names}
     unet.eval()
     criteria = torch.nn.MSELoss()
-    # prompt = [prompt] if isinstance(prompt, str) else prompt
     prompt = [p.strip() for p in prompt.split(',')]
-    for i in tqdm(range(iterations), desc='[Fisher]'):
-        text_tokens = tokenizer(prompt, padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
-        text_embeddings = text_encoder(text_tokens.input_ids.to(device))[0]
-        unconditional_tokens = tokenizer([""], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
-        unconditional_embeddings = text_encoder(unconditional_tokens.input_ids.to(device))[0]
-        text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
-        # Random latents
-        latents = torch.randn(2, unet.in_channels, 64, 64, device=device)
-        t = torch.randint(0, 1000, (1,), device=device).long()
-        # Forward
-        latents = latents.to(device)
-        t = t.to(device)
-        latents.requires_grad = True
-        noise_pred = unet(latents, t, encoder_hidden_states=text_embeddings).sample
-        loss = criteria(noise_pred, torch.zeros_like(noise_pred))
-        loss.backward()
-        for name in module_names:
-            module = dict(unet.named_modules())[name]
-            if hasattr(module, 'weight') and module.weight.grad is not None:
-                fisher_info[name] += module.weight.grad.data.pow(2)
+    for p in prompt:
+        for _ in tqdm(range(iterations), desc='[Fisher]'):
+            text_tokens = tokenizer([p], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            text_embeddings = text_encoder(text_tokens.input_ids.to(device))[0]
+            unconditional_tokens = tokenizer([""], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            unconditional_embeddings = text_encoder(unconditional_tokens.input_ids.to(device))[0]
+            text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
+            latents = torch.randn(2, unet.in_channels, 64, 64, device=device)
+            t = torch.randint(0, 1000, (1,), device=device).long()
+            latents = latents.to(device)
+            t = t.to(device)
+            latents.requires_grad = True
+            noise_pred = unet(latents, t, encoder_hidden_states=text_embeddings).sample
+            loss = criteria(noise_pred, torch.zeros_like(noise_pred))
+            loss.backward()
+            for name in module_names:
+                module = dict(unet.named_modules())[name]
+                if hasattr(module, 'weight') and module.weight.grad is not None:
+                    fisher_info[name] += module.weight.grad.data.pow(2)
     for name in fisher_info:
-        fisher_info[name] /= iterations
+        fisher_info[name] /= (iterations * len(prompt))
     text_encoder.to(origin_text_encoder_device)
     return fisher_info
 

@@ -32,7 +32,7 @@ def main():
     if args.unet_checkpoint is not None:
         pipe.unet.load_state_dict(torch.load(args.unet_checkpoint), strict=False)
 
-    device = "cuda:3" if torch.cuda.is_available() else "cpu"
+    device = "cuda:0" if torch.cuda.is_available() else "cpu"
 
     gen = torch.Generator(device)
     pipe = pipe.to(device)
