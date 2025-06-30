@@ -40,6 +40,12 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     gen.manual_seed(0)
     torch.manual_seed(0)
+    
+    save_path_instances = [i for i in args.unet_checkpoint.split('/')]
+    save_path_instances = save_path_instances[2:7]
+    
+    save_path = os.path.join(f"eval/{save_path_instances[0]}_{save_path_instances[1]}_{save_path_instances[2]}_{save_path_instances[3]}_{save_path_instances[4]}")
+    os.makedirs(save_path, exist_ok=True)
 
     with torch.no_grad():
         for i in range(5):
@@ -50,7 +56,9 @@ def main():
             image = out.images[0]
             # Save image
             filename = '_'.join(args.prompt.split(" "))
-            image.save(os.path.join(args.output_dir, f"{filename}_{i}.png"))
+            image.save(os.path.join(save_path, f"{filename}_{i}.png"))
+    
+    print(f"[Save] Saved images at {save_path}")
 
 
 if __name__ == "__main__":

@@ -44,8 +44,8 @@ def train_text_mode(args):
         if args.lora_ckpt_path:
             lora_modules.load_state_dict(torch.load(args.lora_ckpt_path))
             unet.load_state_dict(torch.load(args.remained_unet_ckpt_path))
-            print(f"Loaded LoRA checkpoint from {args.lora_ckpt_path}")
-            print(f"Loaded remained UNet checkpoint from {args.remained_unet_ckpt_path}")
+            print(f"[Loading] Loaded LoRA checkpoint from {args.lora_ckpt_path}")
+            print(f"[Loading] Loaded remained UNet checkpoint from {args.remained_unet_ckpt_path}")
         parameters = lora_modules.parameters()
         unet.eval()
     else:
@@ -110,4 +110,4 @@ def train_text_mode(args):
                 print(f"[Checkpoint] Saved model at iteration {idx + 1}")
             else:
                 save_model(unet, unet_save_path, idx+1, model_name='unet')
-                print(f"[Checkpoint] Saved at iteration {idx + 1}")
+                print(f"[Checkpoint] Saved model at iteration {idx + 1}")

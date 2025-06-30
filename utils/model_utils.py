@@ -298,7 +298,7 @@ def merge_lora_to_unet(unet, lora_modules):
         module = module_dict[lora_name]
         if not (hasattr(module, 'weight') and module.weight is not None):
             continue
-            
+
         # Linear
         if isinstance(lora_module.lora_down, torch.nn.Linear):
             lora_weight = lora_module.lora_up.weight @ lora_module.lora_down.weight
