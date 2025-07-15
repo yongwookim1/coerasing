@@ -62,7 +62,7 @@ def train_text_mode(args):
 
     noise_scheduler.set_timesteps(num_inference_steps)
 
-    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr), "Df")
+    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr))
     if args.lora_init_method == None:
         unet_save_path = os.path.join(save_path, "unet")
         os.makedirs(unet_save_path, exist_ok=True)
