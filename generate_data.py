@@ -31,7 +31,7 @@ root_dir = "/home/dataset/generation_dataset_v1_5"
 if not os.path.exists(root_dir):
     os.mkdir(root_dir)
 label_dict = [args.label]
-numbers_per_class = 5
+numbers_per_class = 500
 
 for label in label_dict:
     save_dir = os.path.join(root_dir, label)

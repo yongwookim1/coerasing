@@ -6,7 +6,6 @@ from PIL import Image
 
 import torch
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
 
 import torchvision
 from torchvision import transforms
@@ -42,11 +41,11 @@ def train_image_mode(args):
     # Load models
     origin_unet = load_unet(args.ckpt_path, requires_grad=False).to(device_1)
     unet = load_unet(args.ckpt_path, requires_grad=True).to(device_2)
-    
 
     if args.unet_ckpt_path:
-        unet.load_state_dict(torch.load(args.unet_ckpt_path))
-        origin_unet.load_state_dict(torch.load(args.unet_ckpt_path))
+        checkpoint = torch.load(args.unet_ckpt_path, map_location='cpu')
+        unet.load_state_dict(checkpoint, strict=False)
+        print(f"[Loading] Loaded UNet checkpoint from {args.unet_ckpt_path}")
 
     unet.train()
     origin_unet.eval()
@@ -57,18 +56,25 @@ def train_image_mode(args):
     # Init optimizer
     if args.lora_init_method is not None:
         lora_modules = add_lora_to_unet(
-            unet, args.lora_rank, args.lora_alpha, args.train_method,
-            lora_init_prompt=args.lora_init_prompt,
-            lora_init_method=args.lora_init_method,
+            unet,
             tokenizer=tokenizer,
             text_encoder=text_encoder,
+            vae=vae,
+            scheduler=noise_scheduler,
             device=unet.device,
-        )
+            train_method=args.train_method,
+            lora_rank=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            lora_init_method=args.lora_init_method,
+            lora_init_prompt=args.lora_init_prompt,
+            image_path=args.image,
+            retain_image_path=args.retain_image_path,
+            )
         if args.lora_ckpt_path:
             lora_modules.load_state_dict(torch.load(args.lora_ckpt_path))
             unet.load_state_dict(torch.load(args.remained_unet_ckpt_path))
-            print(f"Loaded LoRA checkpoint from {args.lora_ckpt_path}")
-            print(f"Loaded remained UNet checkpoint from {args.remained_unet_ckpt_path}")
+            print(f"[Loading] Loaded LoRA checkpoint from {args.lora_ckpt_path}")
+            print(f"[Loading] Loaded remained UNet checkpoint from {args.remained_unet_ckpt_path}")
         parameters = lora_modules.parameters()
     else:
         parameters = get_training_params(unet, args.train_method)
@@ -79,15 +85,17 @@ def train_image_mode(args):
     noise_scheduler.set_timesteps(num_inference_steps)
 
     # Define save path
-    save_dir = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr))
-    if args.lora_init_method is not None:
-        lora_save_path = os.path.join(save_dir, "lora")
-        os.makedirs(lora_save_path, exist_ok=True)
-        writer = SummaryWriter(lora_save_path)
-    else:
-        unet_save_path = os.path.join(save_dir, "unet")
+    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr))
+    if args.lora_init_method == None:
+        unet_save_path = os.path.join(save_path, "unet")
         os.makedirs(unet_save_path, exist_ok=True)
-        writer = SummaryWriter(unet_save_path)
+    elif args.lora_init_method == 'default':
+        lora_save_path = os.path.join(save_path, str(args.lora_rank), "default")
+        os.makedirs(lora_save_path, exist_ok=True)
+    elif args.lora_init_method == 'fisher':
+        lora_save_path = os.path.join(save_path, str(args.lora_rank), "fisher")
+        os.makedirs(lora_save_path, exist_ok=True)
+
 
     # Image encoder
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.image_encoder_path).to(origin_unet.device)
@@ -204,8 +212,6 @@ def train_image_mode(args):
 
         loss.backward()
         optimizer.step()
-
-        writer.add_scalar('image_training_loss', loss.item(), idx + 1)
 
         if (idx + 1) % args.save_iter == 0:
             if args.lora_init_method is not None:

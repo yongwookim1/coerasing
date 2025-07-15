@@ -4,7 +4,6 @@ from tqdm import tqdm
 import torch
 import yaml
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
 
 from utils.model_utils import load_unet, load_others, add_lora_to_unet, merge_lora_to_unet
 from utils.training_utils import get_training_params
@@ -20,27 +19,33 @@ def train_text_mode(args):
     origin_unet = load_unet(args.ckpt_path, requires_grad=False).to(device_1)
     unet = load_unet(args.ckpt_path, requires_grad=True).to(device_2)
     
+    origin_unet.eval()
+    unet.train()
 
     if args.unet_ckpt_path:
-        unet.load_state_dict(torch.load(args.unet_ckpt_path))
         origin_unet.load_state_dict(torch.load(args.unet_ckpt_path))
+        unet.load_state_dict(torch.load(args.unet_ckpt_path))
+        print(f"[Loading] Loaded UNet checkpoint from {args.unet_ckpt_path}")
 
     vae, tokenizer, text_encoder, noise_scheduler, _ = load_others(args.ckpt_path, requires_grad=False)
     text_encoder = text_encoder.to(origin_unet.device)
 
-    unet.train()
-    origin_unet.eval()
-
     if args.lora_init_method is not None:
         lora_modules = add_lora_to_unet(
-            unet, args.lora_rank, args.lora_alpha, args.train_method,
-            lora_init_prompt=args.lora_init_prompt,
-            lora_init_method=args.lora_init_method,
+            unet,
             tokenizer=tokenizer,
             text_encoder=text_encoder,
+            vae=vae,
+            scheduler=noise_scheduler,
             device=unet.device,
+            train_method=args.train_method,
+            lora_rank=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            lora_init_method=args.lora_init_method,
+            lora_init_prompt=args.lora_init_prompt,
+            image_path=args.image,
+            retain_image_path=args.retain_image_path,
             )
-
         if args.lora_ckpt_path:
             lora_modules.load_state_dict(torch.load(args.lora_ckpt_path))
             unet.load_state_dict(torch.load(args.remained_unet_ckpt_path))
@@ -57,15 +62,17 @@ def train_text_mode(args):
 
     noise_scheduler.set_timesteps(num_inference_steps)
 
-    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr))
-    if args.lora_init_method is not None:
-        lora_save_path = os.path.join(save_path, "lora")
-        os.makedirs(lora_save_path, exist_ok=True)
-        writer = SummaryWriter(lora_save_path)
-    else:
+    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr), "Df")
+    if args.lora_init_method == None:
         unet_save_path = os.path.join(save_path, "unet")
         os.makedirs(unet_save_path, exist_ok=True)
-        writer = SummaryWriter(unet_save_path)
+    elif args.lora_init_method == 'default':
+        lora_save_path = os.path.join(save_path, str(args.lora_rank), "default")
+        os.makedirs(lora_save_path, exist_ok=True)
+    elif args.lora_init_method == 'fisher':
+        lora_save_path = os.path.join(save_path, str(args.lora_rank), "fisher")
+        os.makedirs(lora_save_path, exist_ok=True)
+
     prompt_list = [p.strip() for p in args.prompt.split(',')]
 
     for idx in tqdm(range(args.iterations)):
@@ -98,8 +105,6 @@ def train_text_mode(args):
         loss = criterion(cond_noise, uncond_origin_noise - args.negative_guidance * (cond_origin_noise - uncond_origin_noise))
         loss.backward()
         optimizer.step()
-
-        writer.add_scalar('Loss/train', loss.item(), idx)
 
         if (idx + 1) % args.save_iter == 0:
             if args.lora_init_method is not None:

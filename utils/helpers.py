@@ -20,6 +20,7 @@ def init_args():
     parser.add_argument('--save_iter', type=int, default=500)
     parser.add_argument('--negative_guidance', type=float, default=1.0)
     parser.add_argument('--image', type=str, default='/home/dataset/generation_dataset_v1_5/nudity')
+    parser.add_argument('--retain_image_path', type=str, default='/home/dataset/generation_dataset_v1_5/person')
     parser.add_argument('--contrastive_image', type=str, default=None)
     parser.add_argument('--image_number', type=int, default=100)
     parser.add_argument('--noise_factor', type=float, default=0.0)
@@ -32,7 +33,7 @@ def init_args():
     parser.add_argument('--num_inference_steps', type=int, default=50)
 
     # LoRA arguments
-    parser.add_argument('--lora_init_method', type=str, default=None, choices=['standard', 'fisher', None])
+    parser.add_argument('--lora_init_method', type=str, default=None, choices=['default', 'fisher', None])
     parser.add_argument('--lora_rank', type=int, default=16)
     parser.add_argument('--lora_alpha', type=float, default=1.0)
     parser.add_argument('--lora_ckpt_path', type=str, default=None)

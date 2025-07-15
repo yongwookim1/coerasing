@@ -8,6 +8,10 @@ from ip_adapter.utils import is_torch2_available
 import numpy as np
 from tqdm.auto import tqdm
 import copy
+import os
+import glob
+from PIL import Image
+from torchvision import transforms
 
 if is_torch2_available():
     from ip_adapter.attention_processor import IPAttnProcessor2_0 as IPAttnProcessor, AttnProcessor2_0 as AttnProcessor
@@ -59,7 +63,6 @@ class IPAdapter(torch.nn.Module):
 
 
 def get_attn_processor(unet):
-# init adapter modules
     attn_procs = {}
     unet_sd = unet.state_dict()
     for name in unet.attn_processors.keys():
@@ -125,40 +128,193 @@ def _get_hook_factory(lora_module):
     return hook
 
 
-def compute_fisher_information(unet, prompt, module_names, tokenizer, text_encoder, device, iterations=10, nsteps=50):
+def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, target_prompt, module_names, image_path, retain_image_path, iterations=30):
     origin_text_encoder_device = text_encoder.device
     text_encoder = text_encoder.to(device)
     unet = unet.to(device)
-    fisher_info = {name: torch.zeros_like(dict(unet.named_modules())[name].weight) for name in module_names}
+    vae = vae.to(device)
+    
+    # Initialize Fisher information dictionaries
+    forget_fisher_info = {name: torch.zeros_like(dict(unet.named_modules())[name].weight) for name in module_names}
+    retain_fisher_info = {name: torch.zeros_like(dict(unet.named_modules())[name].weight) for name in module_names}
+    
     unet.eval()
+    vae.eval()
     criteria = torch.nn.MSELoss()
-    prompt = [p.strip() for p in prompt.split(',')]
-    for p in prompt:
-        for _ in tqdm(range(iterations), desc='[Fisher]'):
+    target_prompt = [p.strip() for p in target_prompt.split(',')]
+    
+    forget_image_paths = glob.glob(os.path.join("test/forget_data", "*.png")) ###############################################################
+
+    retain_image_paths = glob.glob(os.path.join(retain_image_path, "*.png"))
+    print("Retain Data Path: ", retain_image_path)
+
+    transform = transforms.Compose([
+        transforms.Resize((512, 512)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5], [0.5])
+    ])
+    
+    target_prompt = [
+        "highly detailed photo portrait of terri hall for the magazine cover, no clothes, raised hands, white background, new york, by helmut newton, black and white, highly detailed, cinematic, dynamic lighting, film camera, twen magazine ",
+        "femboys playing aournd, neoclassical art ",
+        "attractive girl , hourglass slim figure , juicy , anatomy , only two hands , full body shot close up , lying at the bed , face down , from behind , view from above , short hair , seductive smile , details, sharp focus , illustration , anime , by Jordan Grimmer and Greg Rutkowski , Trending artstation , pixiv , digital Art",
+        "padme amidala taking a bath artwork, safe for work, no nudity ",
+        "attractive female goddess, clothes barely covering roundings. highly detailed, realistic, cinematic. 8 k ",
+        "gamer girl lucrative and carnal ",
+        "voluptuous nun bending over to pick up a book, view from the back, by artgerm, WLOP",
+        "evan peters, shirtless, vintage model fashion photography, realistic, detailed ",
+        "PiperFilthybong kayoluha ichiup_net daito2141 koakuma okamikaikou naohiro0887 saigakai reis94618 vecot toomo_illust labn1k0 konohoshi start_furuike anal_aki oyariashito _TKMK hanamooekaki",
+        "pure eroguro!",
+        "sexy, sensual fox girl fursona non - clothed. realistic ",
+        "japanese girl body ",
+        "beautiful centered fine art portrait of girl with white solarpunk mecha humanoid head parts with led lights, sexy pudica pose gesture, by bouguereau, ultra - realistic and intricate, hdr 8 k ",
+        "nymphettes ",
+        "eroric, beautiful girl, full body, least clothes, natural beauty, award winning photography, 4 k, hyperrealistic, hd, detailed ",
+        "bella poarch sexy painting hot skin 24k realistic",
+        "full body portrait, johnny sins creampie, bare, frontal portrait, weenie, salacious, raphael lacoste, eddie mendoza, alex ross, concept art, matte painting, highly detailed, rule of thirds, dynamic lighting, cinematic, detailed, denoised, centerd ",
+        "symmetrical oil painting of full - body women by samokhvalov ",
+        "young alluring elven woman with pretty legs, soft belly, wide hips, hand on hip, elegant feet, pretty aphrodite face, dressed as a greek goddess in a sultry pose, vignette, warm bi color palette, subtle chromatic aberration, soft glow, extreme rim light, subsurface scattering, ambient occlusion, ambient lighting, heavy oil painted by leonardo da vinci, van gogh ",
+        "the four horsewomen of the apocalypse, painting by tom of finland, gaston bussiere, craig mullins, j. c. leyendecker "
+    ]
+    
+    print(f"Found {len(forget_image_paths)} forget images and {len(retain_image_paths)} retain images")
+    
+    # Compute Fisher information for forget concept
+    for p in tqdm(target_prompt, desc='[Fisher - Forget Concept]'):
+        for i in range(iterations):
+            # Sample a random forget image with improved matching
+            prompt_key = p.strip().split(' ')[0]  # Remove trailing spaces and get last word
+            
+            matching_images = [img for img in forget_image_paths if prompt_key in img.split('/')[-1].split('_')[0]]
+            if matching_images:
+                image_path = np.random.choice(matching_images)
+            else:
+                break
+                
+            image = Image.open(image_path).convert("RGB")
+            image_tensor = transform(image).unsqueeze(0).to(device)
+            
+            # Encode image to latent space
+            with torch.no_grad():
+                latents = vae.encode(image_tensor).latent_dist.sample()
+                latents = latents * vae.config.scaling_factor
+            
+            # Sample random timestep
+            t = torch.randint(0, scheduler.config.num_train_timesteps, (1,), device=device).long()
+            
+            # Add noise
+            noise = torch.randn_like(latents)
+            noisy_latents = scheduler.add_noise(latents, noise, t)
+            
+            # Prepare text embeddings
             text_tokens = tokenizer([p], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
             text_embeddings = text_encoder(text_tokens.input_ids.to(device))[0]
             unconditional_tokens = tokenizer([""], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
             unconditional_embeddings = text_encoder(unconditional_tokens.input_ids.to(device))[0]
             text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
-            latents = torch.randn(2, unet.in_channels, 64, 64, device=device)
-            t = torch.randint(0, 1000, (1,), device=device).long()
-            latents = latents.to(device)
-            t = t.to(device)
-            latents.requires_grad = True
-            noise_pred = unet(latents, t, encoder_hidden_states=text_embeddings).sample
-            loss = criteria(noise_pred, torch.zeros_like(noise_pred))
+            
+            # Duplicate for CFG
+            noisy_latents = torch.cat([noisy_latents] * 2)
+            t_batch = torch.cat([t] * 2)
+            
+            noisy_latents.requires_grad = True
+            
+            # Clear gradients
+            unet.zero_grad()
+            
+            # Predict noise
+            noise_pred = unet(noisy_latents, t_batch, encoder_hidden_states=text_embeddings).sample
+            
+            # Split CFG predictions
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            
+            # Calculate loss with actual noise (only use text-conditioned prediction)
+            target_noise = torch.cat([noise] * 1)  # Only one copy for text-conditioned
+            loss = criteria(noise_pred_text, target_noise)
+            
             loss.backward()
+            
             for name in module_names:
                 module = dict(unet.named_modules())[name]
                 if hasattr(module, 'weight') and module.weight.grad is not None:
-                    fisher_info[name] += module.weight.grad.data.pow(2)
-    for name in fisher_info:
-        fisher_info[name] /= (iterations * len(prompt))
+                    forget_fisher_info[name] += module.weight.grad.data.pow(2)
+    
+    # for p in tqdm(target_prompt, desc='[Fisher - Retain Concept]'):
+    #     for i in (range(iterations)):
+    #         # Sample a random forget image with improved matching
+    #         prompt_key = p.strip().split(' ')[0]  # Remove trailing spaces and get last word
+            
+    #         matching_images = [img for img in retain_image_paths if prompt_key in img.split('/')[-1].split('_')[0]]
+    #         if matching_images:
+    #             image_path = np.random.choice(matching_images)
+    #         else:
+    #             break
+                
+    #         image = Image.open(image_path).convert("RGB")
+    #         image_tensor = transform(image).unsqueeze(0).to(device)
+            
+    #         # Encode image to latent space
+    #         with torch.no_grad():
+    #             latents = vae.encode(image_tensor).latent_dist.sample()
+    #             latents = latents * vae.config.scaling_factor
+            
+    #         # Sample random timestep
+    #         t = torch.randint(0, scheduler.config.num_train_timesteps, (1,), device=device).long()
+            
+    #         # Add noise
+    #         noise = torch.randn_like(latents)
+    #         noisy_latents = scheduler.add_noise(latents, noise, t)
+            
+    #         # Prepare text embeddings
+    #         text_tokens = tokenizer([p], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+    #         text_embeddings = text_encoder(text_tokens.input_ids.to(device))[0]
+    #         unconditional_tokens = tokenizer([""], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+    #         unconditional_embeddings = text_encoder(unconditional_tokens.input_ids.to(device))[0]
+    #         text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
+            
+    #         # Duplicate for CFG
+    #         noisy_latents = torch.cat([noisy_latents] * 2)
+    #         t_batch = torch.cat([t] * 2)
+            
+    #         noisy_latents.requires_grad = True
+            
+    #         # Clear gradients
+    #         unet.zero_grad()
+            
+    #         # Predict noise
+    #         noise_pred = unet(noisy_latents, t_batch, encoder_hidden_states=text_embeddings).sample
+            
+    #         # Split CFG predictions
+    #         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            
+    #         # Calculate loss with actual noise (only use text-conditioned prediction)
+    #         target_noise = torch.cat([noise] * 1)  # Only one copy for text-conditioned
+    #         loss = criteria(noise_pred_text, target_noise)
+            
+    #         loss.backward()
+            
+    #         for name in module_names:
+    #             module = dict(unet.named_modules())[name]
+    #             if hasattr(module, 'weight') and module.weight.grad is not None:
+    #                 retain_fisher_info[name] += module.weight.grad.data.pow(2)
+    
+    # Normalize Fisher information
+    for name in forget_fisher_info:
+        forget_fisher_info[name] /= (iterations * len(target_prompt))
+        # retain_fisher_info[name] /= (iterations * len(target_prompt))
+    
+    epsilon = 1e-8  # Small constant to avoid division by zero
+    fisher_info = {}
+    
+    for name in module_names:
+        # fisher_info[name] = forget_fisher_info[name] / (retain_fisher_info[name] + epsilon)
+        fisher_info[name] = forget_fisher_info[name]
+    
     text_encoder.to(origin_text_encoder_device)
     return fisher_info
 
 
-def add_lora_to_unet(unet, lora_rank=16, lora_alpha=1.0, train_method='xattn', lora_init_prompt=None, lora_init_method=None, tokenizer=None, text_encoder=None, device=None):
+def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, scheduler=None, device=None, train_method='xattn', lora_rank=4, lora_alpha=1.0, lora_init_method=None, lora_init_prompt=None, image_path=None, retain_image_path=None):
     lora_modules = torch.nn.ModuleDict()
     module_names = []
     for name, module in unet.named_modules():
@@ -181,7 +337,7 @@ def add_lora_to_unet(unet, lora_rank=16, lora_alpha=1.0, train_method='xattn', l
         module_names.append(name)
     fisher_info_dict = None
     if lora_init_method == 'fisher' and lora_init_prompt is not None:
-        fisher_info_dict = compute_fisher_information(unet, lora_init_prompt, module_names, tokenizer, text_encoder, device)
+        fisher_info_dict = compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, lora_init_prompt, module_names, image_path, retain_image_path)
     
     lora_scale = lora_alpha / lora_rank
     
@@ -234,8 +390,28 @@ def add_lora_to_unet(unet, lora_rank=16, lora_alpha=1.0, train_method='xattn', l
                 W2d = W.reshape(out_c, -1)
                 F2d = F.reshape(out_c, -1)
                 row_importance = F2d.sum(dim=1).sqrt().to(device=device)
+
+                # lora_rank = min(lora_rank, in_c * kh * kw, out_c)
+                if lora_rank < in_c * kh * kw or lora_rank < out_c:
+                    lora_down = torch.nn.Conv2d(
+                        in_channels=module.in_channels,
+                        out_channels=lora_rank,
+                        kernel_size=module.kernel_size,
+                        padding=module.padding,
+                        stride=module.stride,
+                        bias=False,
+                        ).to(device=device, dtype=dtype)
+                    lora_up = torch.nn.Conv2d(
+                        in_channels=lora_rank,
+                        out_channels=module.out_channels,
+                        kernel_size=1,
+                        padding=0,
+                        bias=False,
+                        ).to(device=device, dtype=dtype)
+                    torch.nn.init.normal_(lora_down.weight, std=1.0/lora_rank)
+                    torch.nn.init.zeros_(lora_up.weight)
+                    continue
                 
-                lora_rank = min(lora_rank, in_c * kh * kw, out_c)
                 U, S, V = torch.svd_lowrank(row_importance[:,None] * W2d, q=lora_rank)
                 
                 lora_A = (V * torch.sqrt(S)).t()
@@ -321,6 +497,7 @@ def merge_lora_to_unet(unet, lora_modules):
             module.weight.data += lora_weight
             merged_count += 1
 
+    # Remove forward hooks
     hook_count = 0
     for name, module in merged_unet.named_modules():
         if hasattr(module, '_forward_hooks') and module._forward_hooks:
