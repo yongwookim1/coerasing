@@ -223,7 +223,7 @@ if __name__ == '__main__':
                     guidance_scale=7.5,
                     )
             img = out.images[0]
-    
+
             safe = True ## True for toxicity and privacy, False for fairness
             prompt = textprocess(safe=safe)
             vis_processor = ImageProcessor(image_size=490)

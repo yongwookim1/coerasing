@@ -92,24 +92,24 @@ def init_model(model_path, training_args: TrainingArguments, data_args: DataArgu
     
     if training_args.use_lora and lora_args.lora_weight_path != '':
         if lora_args.lora_type == 'lora':
-            # try:
-                # delta_path = os.path.join(lora_args.lora_weight_path, 'adapter_model.bin')
-                # delta_ckpt = torch.load(delta_path, 'cpu')
-            # except:
-            from safetensors.torch import load_file
-            delta_path = os.path.join(lora_args.lora_weight_path, 'adapter_model.safetensors')
-            delta_ckpt = load_file(delta_path, 'cpu')
+            try:
+                delta_path = os.path.join(lora_args.lora_weight_path, 'adapter_model.bin')
+                delta_ckpt = torch.load(delta_path, 'cpu')
+            except:
+                from safetensors.torch import load_file
+                delta_path = os.path.join(lora_args.lora_weight_path, 'adapter_model.safetensors')
+                delta_ckpt = load_file(delta_path, 'cpu')
             new_dict = {}
             for key, value in delta_ckpt.items():
                 new_dict[f'{key[:-7]}.default.weight'] = value 
             _load_state_dict_into_model(model, new_dict, start_prefix='')
             print(f'load delta ckpt from {os.path.abspath(delta_path)}')
 
-            # non_lora_ckpt_path = os.path.join(lora_args.lora_weight_path, 'non_lora_trainables.bin')
-            # if os.path.exists(non_lora_ckpt_path):
-            #     non_lora_trainables = torch.load(non_lora_ckpt_path, map_location='cpu')
-            #     _load_state_dict_into_model(model, non_lora_trainables, start_prefix='')
-            #     print(f'load non lora ckpt from {os.path.abspath(non_lora_ckpt_path)}')
+            non_lora_ckpt_path = os.path.join(lora_args.lora_weight_path, 'non_lora_trainables.bin')
+            if os.path.exists(non_lora_ckpt_path):
+                non_lora_trainables = torch.load(non_lora_ckpt_path, map_location='cpu')
+                _load_state_dict_into_model(model, non_lora_trainables, start_prefix='')
+                print(f'load non lora ckpt from {os.path.abspath(non_lora_ckpt_path)}')
         else:
             raise NotImplementedError
    

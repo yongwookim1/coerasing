@@ -70,8 +70,7 @@ class BaseModel:
                 tokenizer=self.tokenizer,
                 model=self.model)
         else:
-            # reshape_model_embedding(self.tokenizer, self.model)
-            pass
+            reshape_model_embedding(self.tokenizer, self.model)
         self.model.tokenizer = self.tokenizer
 
     def load_model_tokenizer(self):
