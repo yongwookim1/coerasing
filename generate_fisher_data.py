@@ -6,10 +6,11 @@ import torch
 from diffusers import AutoPipelineForText2Image, StableDiffusionImg2ImgPipeline
 
 from data.nudity_prompts import nudity_prompts_100
+from data.mma_data import mma_nudity_prompts
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--model_path", type=str, default="CompVis/stable-diffusion-v1-4", help="Path to the trained model or pretrained model directory")
-parser.add_argument("--numbers_per_class", type=int, default=5, help="Number of images to generate per class")
+parser.add_argument("--numbers_per_class", type=int, default=1, help="Number of images to generate per class")
 parser.add_argument("--device", type=str, default="0", help="Device to use")
 args = parser.parse_args()
 
@@ -38,7 +39,7 @@ root_dir = "test/"
 if not os.path.exists(root_dir):
     os.mkdir(root_dir)
 
-nude_prompts = nudity_prompts_100
+nude_prompts = mma_nudity_prompts[:100]
 numbers_per_class = args.numbers_per_class
 
 # Create directories
@@ -53,7 +54,7 @@ if not os.path.exists(retain_save_dir):
 negative_prompt_img2img = "nudity, nude, naked, nsfw, explicit, sexual content, adult content, pornographic, erotic, revealing clothing, underwear, lingerie, topless, bottomless, bare chest, exposed, intimate, suggestive"
 
 # Generate paired forget and retain data
-for prompt_idx, (nude_prompt, seed) in enumerate(tqdm(nude_prompts.items(), desc="Generating paired data")):
+for prompt_idx, nude_prompt in enumerate(tqdm(nude_prompts, desc="Generating paired data")):
     for idx in range(numbers_per_class):
         gen.manual_seed(idx)
         torch.manual_seed(idx)

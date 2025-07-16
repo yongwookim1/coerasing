@@ -215,8 +215,8 @@ def train_image_mode(args):
 
         if (idx + 1) % args.save_iter == 0:
             if args.lora_init_method is not None:
-                save_model(lora_modules, lora_save_path, idx+1, model_name='lora')
-                save_model(unet, lora_save_path, idx+1, model_name='remained_unet')
+                # save_model(lora_modules, lora_save_path, idx+1, model_name='lora')
+                # save_model(unet, lora_save_path, idx+1, model_name='remained_unet')
                 merged_unet = merge_lora_to_unet(unet, lora_modules)
                 save_model(merged_unet, lora_save_path, idx+1, model_name='merged_unet')
                 print(f"[Checkpoint] Saved model at iteration {idx + 1}")
