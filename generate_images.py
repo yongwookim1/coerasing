@@ -12,7 +12,7 @@ def parse_args():
     parser.add_argument("--prompt", type=str)
     parser.add_argument("--num_inference_steps", type=str, default=50)
     parser.add_argument("--guidance_scale", type=float, default=7.5)
-    parser.add_argument("--output_dir", type=str, default="eval/")
+    parser.add_argument("--output_path", type=str, default="eval/")
     parser.add_argument("--device", type=str, default="2")
 
     args = parser.parse_args()
@@ -37,14 +37,14 @@ def main():
     gen = torch.Generator(device)
     pipe = pipe.to(device)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_path, exist_ok=True)
     gen.manual_seed(0)
     torch.manual_seed(0)
     
     if args.unet_checkpoint is not None:
         save_path_instances = [i for i in args.unet_checkpoint.split('/')]
-        save_path_instances = save_path_instances[2:8]
-        save_path = os.path.join(f"eval/{save_path_instances[0]}_{save_path_instances[1]}_{save_path_instances[2]}_{save_path_instances[3]}_{save_path_instances[4]}_{save_path_instances[5]}")
+        save_path_instances = save_path_instances[2:]
+        save_path = os.path.join(f"eval/{save_path_instances[0]}_{save_path_instances[1]}_{save_path_instances[2]}_{save_path_instances[3]}_{save_path_instances[4]}_{save_path_instances[5]}_{save_path_instances[6]}")
     else:
         save_path = os.path.join("eval/SD")
     

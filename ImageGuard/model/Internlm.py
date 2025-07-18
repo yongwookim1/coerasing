@@ -18,7 +18,7 @@ class InternLM(BaseModel):
         model = InternLMXComposer2ForCausalLM.from_pretrained(
             self.model_path,
             config=config,
-            device_map=None,
+            torch_dtype=torch.float16,
             use_caption=self.use_caption
         )
 

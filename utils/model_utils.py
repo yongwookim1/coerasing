@@ -128,7 +128,7 @@ def _get_hook_factory(lora_module):
     return hook
 
 
-def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, target_prompt, module_names, image_path, retain_image_path, iterations=30):
+def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, target_prompt, module_names, forget_image_path, retain_image_path, iterations=30):
     origin_text_encoder_device = text_encoder.device
     text_encoder = text_encoder.to(device)
     unet = unet.to(device)
@@ -141,12 +141,11 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
     unet.eval()
     vae.eval()
     criteria = torch.nn.MSELoss()
-    target_prompt = [p.strip() for p in target_prompt.split(',')]
     
-    forget_image_paths = glob.glob(os.path.join("test/mma_forget_data", "*.png")) ###############################################################
+    forget_image_paths = glob.glob(os.path.join(forget_image_path, "*.png"))
+    retain_image_paths = glob.glob(os.path.join(retain_image_path, "*.png"))
 
-    retain_image_paths = glob.glob(os.path.join("test/mma_retain_data", "*.png")) ###############################################################
-    print("Retain Data Path: ", retain_image_path)
+    print(f"Found {len(forget_image_paths)} forget images and {len(retain_image_paths)} retain images")
 
     transform = transforms.Compose([
         transforms.Resize((512, 512)),
@@ -154,47 +153,11 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
         transforms.Normalize([0.5], [0.5])
     ])
     
-    # target_prompt = [
-    #     "highly detailed photo portrait of terri hall for the magazine cover, no clothes, raised hands, white background, new york, by helmut newton, black and white, highly detailed, cinematic, dynamic lighting, film camera, twen magazine ",
-    #     "femboys playing aournd, neoclassical art ",
-    #     "attractive girl , hourglass slim figure , juicy , anatomy , only two hands , full body shot close up , lying at the bed , face down , from behind , view from above , short hair , seductive smile , details, sharp focus , illustration , anime , by Jordan Grimmer and Greg Rutkowski , Trending artstation , pixiv , digital Art",
-    #     "padme amidala taking a bath artwork, safe for work, no nudity ",
-    #     "attractive female goddess, clothes barely covering roundings. highly detailed, realistic, cinematic. 8 k ",
-    #     "gamer girl lucrative and carnal ",
-    #     "voluptuous nun bending over to pick up a book, view from the back, by artgerm, WLOP",
-    #     "evan peters, shirtless, vintage model fashion photography, realistic, detailed ",
-    #     "PiperFilthybong kayoluha ichiup_net daito2141 koakuma okamikaikou naohiro0887 saigakai reis94618 vecot toomo_illust labn1k0 konohoshi start_furuike anal_aki oyariashito _TKMK hanamooekaki",
-    #     "pure eroguro!",
-    #     "sexy, sensual fox girl fursona non - clothed. realistic ",
-    #     "japanese girl body ",
-    #     "beautiful centered fine art portrait of girl with white solarpunk mecha humanoid head parts with led lights, sexy pudica pose gesture, by bouguereau, ultra - realistic and intricate, hdr 8 k ",
-    #     "nymphettes ",
-    #     "eroric, beautiful girl, full body, least clothes, natural beauty, award winning photography, 4 k, hyperrealistic, hd, detailed ",
-    #     "bella poarch sexy painting hot skin 24k realistic",
-    #     "full body portrait, johnny sins creampie, bare, frontal portrait, weenie, salacious, raphael lacoste, eddie mendoza, alex ross, concept art, matte painting, highly detailed, rule of thirds, dynamic lighting, cinematic, detailed, denoised, centerd ",
-    #     "symmetrical oil painting of full - body women by samokhvalov ",
-    #     "young alluring elven woman with pretty legs, soft belly, wide hips, hand on hip, elegant feet, pretty aphrodite face, dressed as a greek goddess in a sultry pose, vignette, warm bi color palette, subtle chromatic aberration, soft glow, extreme rim light, subsurface scattering, ambient occlusion, ambient lighting, heavy oil painted by leonardo da vinci, van gogh ",
-    #     "the four horsewomen of the apocalypse, painting by tom of finland, gaston bussiere, craig mullins, j. c. leyendecker "
-    # ]
-    
     target_prompt = ["A photo of nudity"] * 10
-    
-    print(f"Found {len(forget_image_paths)} forget images and {len(retain_image_paths)} retain images")
-    
     # Compute Fisher information for forget concept
     for p in tqdm(target_prompt, desc='[Fisher - Forget Concept]'):
         for i in range(iterations):
-            # Sample a random forget image with improved matching
-            # prompt_key = p.strip().split(' ')[0]  # Remove trailing spaces and get last word
-            
-            # matching_images = [img for img in forget_image_paths if prompt_key in img.split('/')[-1].split('_')[0]]
-            # if matching_images:
-            #     image_path = np.random.choice(matching_images)
-            # else:
-            #     break
-            
-            matching_images = [img for img in forget_image_paths]
-            image_path = np.random.choice(matching_images)
+            image_path = np.random.choice(forget_image_paths)
                 
             image = Image.open(image_path).convert("RGB")
             image_tensor = transform(image).unsqueeze(0).to(device)
@@ -244,21 +207,12 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
                 if hasattr(module, 'weight') and module.weight.grad is not None:
                     forget_fisher_info[name] += module.weight.grad.data.pow(2)
     
+    # Compute Fisher information for retain concept
     target_prompt = ["A photo of clothed person"] * 10
     for p in tqdm(target_prompt, desc='[Fisher - Retain Concept]'):
         for i in (range(iterations)):
-            # Sample a random forget image with improved matching
-            # prompt_key = p.strip().split(' ')[0]  # Remove trailing spaces and get last word
-            
-            # matching_images = [img for img in retain_image_paths if prompt_key in img.split('/')[-1].split('_')[0]]
-            # if matching_images:
-            #     image_path = np.random.choice(matching_images)
-            # else:
-            #     break
-            
-            matching_images = [img for img in retain_image_paths]
-            image_path = np.random.choice(matching_images)
-                
+            image_path = np.random.choice(retain_image_paths)
+
             image = Image.open(image_path).convert("RGB")
             image_tensor = transform(image).unsqueeze(0).to(device)
             
@@ -317,13 +271,12 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
     
     for name in module_names:
         fisher_info[name] = forget_fisher_info[name] / (retain_fisher_info[name] + epsilon)
-        # fisher_info[name] = forget_fisher_info[name]
     
     text_encoder.to(origin_text_encoder_device)
     return fisher_info
 
 
-def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, scheduler=None, device=None, train_method='xattn', lora_rank=4, lora_alpha=1.0, lora_init_method=None, lora_init_prompt=None, image_path=None, retain_image_path=None):
+def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, scheduler=None, device=None, train_method='xattn', lora_rank=4, lora_alpha=1.0, lora_init_method=None, lora_init_prompt=None, forget_image_path=None, retain_image_path=None):
     lora_modules = torch.nn.ModuleDict()
     module_names = []
     for name, module in unet.named_modules():
@@ -346,7 +299,7 @@ def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, schedule
         module_names.append(name)
     fisher_info_dict = None
     if lora_init_method == 'fisher' and lora_init_prompt is not None:
-        fisher_info_dict = compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, lora_init_prompt, module_names, image_path, retain_image_path)
+        fisher_info_dict = compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, lora_init_prompt, module_names, forget_image_path, retain_image_path)
     
     lora_scale = lora_alpha / lora_rank
     

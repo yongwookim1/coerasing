@@ -43,7 +43,7 @@ def train_text_mode(args):
             lora_alpha=args.lora_alpha,
             lora_init_method=args.lora_init_method,
             lora_init_prompt=args.lora_init_prompt,
-            image_path=args.image,
+            forget_image_path=args.forget_image_path,
             retain_image_path=args.retain_image_path,
             )
         if args.lora_ckpt_path:
@@ -62,7 +62,7 @@ def train_text_mode(args):
 
     noise_scheduler.set_timesteps(num_inference_steps)
 
-    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr), "mma_clothed")
+    save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr))
     if args.lora_init_method == None:
         unet_save_path = os.path.join(save_path, "unet")
         os.makedirs(unet_save_path, exist_ok=True)
@@ -70,7 +70,7 @@ def train_text_mode(args):
         lora_save_path = os.path.join(save_path, str(args.lora_rank), "default")
         os.makedirs(lora_save_path, exist_ok=True)
     elif args.lora_init_method == 'fisher':
-        lora_save_path = os.path.join(save_path, str(args.lora_rank), "fisher")
+        lora_save_path = os.path.join(save_path, str(args.lora_rank), "fisher", args.forget_image_path.split('/')[-1])
         os.makedirs(lora_save_path, exist_ok=True)
 
     prompt_list = [p.strip() for p in args.prompt.split(',')]

@@ -1,12 +1,14 @@
 import os
 import torch
 import transformers
+import yaml
 # from transformers import deepspeed
 from transformers.integrations import deepspeed
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-from .arguments import TrainingArguments, DataArguments, LoraArguments
 
+from .arguments import ModelArguments, DataArguments, EvalArguments, LoraArguments, TrainingArguments
+from .conv_utils import fair_query, safe_query
 from transformers.modeling_utils import _load_state_dict_into_model
 from model import get_model
 
@@ -116,3 +118,27 @@ def init_model(model_path, training_args: TrainingArguments, data_args: DataArgu
     return model, tokenizer
 
 
+def load_yaml(cfg_path):
+    with open(cfg_path, 'r', encoding='utf-8') as f:
+        result = yaml.load(f.read(), Loader=yaml.FullLoader)
+    return result
+
+def textprocess(safe=True):
+    if safe:
+        conversation = safe_query('Internlm')
+    else:
+        conversation = fair_query('Internlm')
+    return conversation
+
+def model_init(
+    model_args: ModelArguments, 
+    data_args: DataArguments, 
+    training_args: EvalArguments,
+    lora_args: LoraArguments,
+    model_cfg,
+    device):
+    model, tokenizer = init_model(model_args.model_name_or_path, training_args, data_args, lora_args, model_cfg)
+    model.eval()
+    model.to(device).eval().half()
+    model.tokenizer = tokenizer
+    return model
