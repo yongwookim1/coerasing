@@ -14,7 +14,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, default="CompVis/stable-diffusion-v1-4")
     parser.add_argument("--numbers_per_class", type=int, default=1)
-    parser.add_argument("--device", type=str, default="0,4")
+    parser.add_argument("--device", type=str, default="4,0")
     
     return parser.parse_args()
 
@@ -64,20 +64,33 @@ def setup_pipelines(model_path, device_0, device_1):
     return txt2img_pipeline, controlnet_pipeline
 
 
-def extract_canny_edges(image, low_threshold=100, high_threshold=200):
+def extract_canny_edges(image, edge_threshold=10, edge_intensity=0.1, blur_radius=1):
     if image.mode != 'L':
         gray_image = image.convert('L')
     else:
         gray_image = image
     
-    # Edge detection
+    # Apply Gaussian blur before edge detection for smoother edges
+    if blur_radius > 0:
+        gray_image = gray_image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    
+    # Edge detection using PIL
     edges = gray_image.filter(ImageFilter.FIND_EDGES)
     
-    # Apply threshold
+    # Apply threshold to reduce noise and make edges more subtle
     edges_np = np.array(edges)
-    edges_np = np.where(edges_np > 50, 255, 0)
+    edges_np = np.where(edges_np > edge_threshold, edges_np, 0)
     
-    edges_pil = Image.fromarray(edges_np.astype(np.uint8)).convert("RGB")
+    # Reduce edge intensity to make them more subtle
+    edges_np = (edges_np * edge_intensity).astype(np.uint8)
+    
+    # Convert back to PIL and apply additional blur for softer edges
+    edges_pil = Image.fromarray(edges_np)
+    if blur_radius > 0:
+        edges_pil = edges_pil.filter(ImageFilter.GaussianBlur(radius=blur_radius * 0.5))
+    
+    # Convert to RGB
+    edges_pil = edges_pil.convert("RGB")
     return edges_pil
 
 
@@ -87,15 +100,16 @@ def create_directories(root_dir, numbers_per_class, num_prompts):
     
     # Create subdirectories
     total_images = numbers_per_class * num_prompts
-    forget_save_dir = os.path.join(root_dir, f"forget_data{total_images}")
-    retain_save_dir = os.path.join(root_dir, f"retain_data{total_images}")
-    comparison_save_dir = os.path.join(root_dir, f"comparison_data{total_images}")
+    forget_save_dir = os.path.join(root_dir, f"AS_forget_data")
+    retain_save_dir = os.path.join(root_dir, f"AS_retain_data")
+    comparison_save_dir = os.path.join(root_dir, f"AS_comparison_data")
+    canny_save_dir = os.path.join(root_dir, f"AS_canny_edges")
     
-    for directory in [forget_save_dir, retain_save_dir, comparison_save_dir]:
+    for directory in [forget_save_dir, retain_save_dir, comparison_save_dir, canny_save_dir]:
         if not os.path.exists(directory):
             os.mkdir(directory)
     
-    return forget_save_dir, retain_save_dir, comparison_save_dir
+    return forget_save_dir, retain_save_dir, comparison_save_dir, canny_save_dir
 
 
 def clean_prompt_for_content(vangogh_prompt):
@@ -134,7 +148,7 @@ def generate_forget_image(txt2img_pipeline, prompt, generator):
 
 def generate_retain_image(controlnet_pipeline, canny_edges, vangogh_prompt, seed, device_1):
     content_prompt = clean_prompt_for_content(vangogh_prompt)
-    retain_prompt = f"photorealistic {content_prompt}, high quality, detailed, realistic lighting"
+    retain_prompt = f"painting of {content_prompt}, artistic, high quality, detailed"
     
     retain_image = controlnet_pipeline(
         prompt=retain_prompt,
@@ -166,7 +180,7 @@ def create_comparison_image(forget_image, retain_image):
     return comparison_image
 
 
-def generate_paired_data(prompts, txt2img_pipeline, controlnet_pipeline, forget_save_dir, retain_save_dir, comparison_save_dir, numbers_per_class, device_0, device_1):
+def generate_paired_data(prompts, txt2img_pipeline, controlnet_pipeline, forget_save_dir, retain_save_dir, comparison_save_dir, canny_save_dir, numbers_per_class, device_0, device_1):
     gen = torch.Generator(f"cuda:{device_0}")
     
     for prompt_idx, vangogh_prompt in enumerate(tqdm(prompts, desc="Generating Van Gogh style removal data")):
@@ -176,30 +190,35 @@ def generate_paired_data(prompts, txt2img_pipeline, controlnet_pipeline, forget_
             
             print(f"Processing: {vangogh_prompt}")
             
-            try:
-                # Generate Van Gogh style image (forget data)
-                forget_image = generate_forget_image(txt2img_pipeline, vangogh_prompt, gen)
-                forget_filename = f"vangogh_{prompt_idx:02d}_{idx:04d}.png"
-                forget_image.save(os.path.join(forget_save_dir, forget_filename))
-                
-                # Extract Canny edges from Van Gogh image
-                canny_edges = extract_canny_edges(forget_image)
-                
-                # Generate style-removed image using ControlNet
-                retain_image = generate_retain_image(controlnet_pipeline, canny_edges, vangogh_prompt, idx, device_1)
-                retain_filename = f"realistic_{prompt_idx:02d}_{idx:04d}.png"
-                retain_image.save(os.path.join(retain_save_dir, retain_filename))
-                
-                # Create and save comparison image
-                comparison_image = create_comparison_image(forget_image, retain_image)
-                comparison_filename = f"comparison_{prompt_idx:02d}_{idx:04d}.png"
-                comparison_image.save(os.path.join(comparison_save_dir, comparison_filename))
-                
-                print(f"Generated: {forget_filename} -> {retain_filename}")
-                
-            except Exception as e:
-                print(f"Error processing prompt {prompt_idx}, iteration {idx}: {str(e)}")
-                continue
+            # Generate Van Gogh style image (forget data)
+            forget_image = generate_forget_image(txt2img_pipeline, vangogh_prompt, gen)
+            forget_filename = f"vangogh_{prompt_idx:02d}_{idx:04d}.png"
+            forget_image.save(os.path.join(forget_save_dir, forget_filename))
+            
+            # Extract very subtle Canny edges from Van Gogh image
+            canny_edges = extract_canny_edges(
+                forget_image, 
+                edge_threshold=20,
+                edge_intensity=0.2,
+                blur_radius=2
+            )
+            
+            # Save Canny edges for inspection ###################
+            canny_filename = f"canny_{prompt_idx:02d}_{idx:04d}.png"
+            canny_edges.save(os.path.join(canny_save_dir, canny_filename))
+            print(f"Canny edges saved: {canny_filename}")
+            
+            # Generate style-removed image using ControlNet
+            retain_image = generate_retain_image(controlnet_pipeline, canny_edges, vangogh_prompt, idx, device_1)
+            retain_filename = f"realistic_{prompt_idx:02d}_{idx:04d}.png"
+            retain_image.save(os.path.join(retain_save_dir, retain_filename))
+            
+            # Create and save comparison image
+            comparison_image = create_comparison_image(forget_image, retain_image)
+            comparison_filename = f"comparison_{prompt_idx:02d}_{idx:04d}.png"
+            comparison_image.save(os.path.join(comparison_save_dir, comparison_filename))
+            
+            print(f"Generated: {forget_filename} -> {retain_filename}")
 
 
 def main():
@@ -211,7 +230,7 @@ def main():
     txt2img_pipeline, controlnet_pipeline = setup_pipelines(args.model_path, device_0, device_1)
     
     root_dir = "./data/"
-    forget_save_dir, retain_save_dir, comparison_save_dir = create_directories(
+    forget_save_dir, retain_save_dir, comparison_save_dir, canny_save_dir = create_directories(
         root_dir, args.numbers_per_class, len(vangogh_prompts)
     )
     
@@ -223,6 +242,7 @@ def main():
         forget_save_dir,
         retain_save_dir,
         comparison_save_dir,
+        canny_save_dir,
         args.numbers_per_class,
         device_0,
         device_1
@@ -232,6 +252,7 @@ def main():
     print(f"Van Gogh style images saved in: {forget_save_dir}")
     print(f"Style-removed images saved in: {retain_save_dir}")
     print(f"Comparison images saved in: {comparison_save_dir}")
+    print(f"Canny edges saved in: {canny_save_dir}")
 
 
 if __name__ == "__main__":

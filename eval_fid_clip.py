@@ -83,12 +83,11 @@ def generate_images(pipe, prompts, seeds, output_dir, device):
             )
         
         image = result.images[0]
-        image_path = os.path.join(output_dir, f"{i:05d}.png")
+        image_path = os.path.join(output_dir, f"{i:04d}.png")
         image.save(image_path)
 
 
 def create_matched_coco_subset(coco10k_path, subset_dir, case_numbers):
-    """Create a subset of COCO images that match the case numbers for 1:1 comparison"""
     os.makedirs(subset_dir, exist_ok=True)
     
     matched_count = 0
@@ -122,10 +121,9 @@ def create_matched_coco_subset(coco10k_path, subset_dir, case_numbers):
 
 def calculate_fid(coco10k_path, generated_images_path, device, case_numbers):
     # Create temporary subset directory
-    subset_dir = os.path.join(os.path.dirname(generated_images_path), "coco_subset_temp")
+    subset_dir = os.path.join(os.path.dirname(generated_images_path), "coco_subset")
     
     # 1:1 matching approach - more accurate evaluation
-    print("Using 1:1 matching between prompts and COCO images")
     num_used = create_matched_coco_subset(coco10k_path, subset_dir, case_numbers)
     
     # Calculate FID with subset
@@ -135,7 +133,6 @@ def calculate_fid(coco10k_path, generated_images_path, device, case_numbers):
 
 
 def calculate_clip_score(prompts, image_dir, device):
-    """Calculate CLIP score between prompts and generated images"""
     clip_model = CLIPModel.from_pretrained("openai/clip-vit-large-patch14").to(device)
     processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
     
@@ -175,26 +172,24 @@ def main():
     
     # Load prompts and case numbers
     all_prompts, all_seeds, all_case_numbers = load_data(args.csv_path)
-    print(f"Loaded {len(all_prompts)} total prompts")
     
     # Take first N prompts
     prompts = all_prompts[:args.num_samples]
     seeds = all_seeds[:args.num_samples]
     case_numbers = all_case_numbers[:args.num_samples]
-    print(f"Using first {len(prompts)} prompts for evaluation")
     
     # Setup output directories
     generated_images_dir = os.path.join(args.output_path, "generated_images")
     os.makedirs(args.output_path, exist_ok=True)
     
     # Setup pipeline
-    print("Setting up UNet pipeline...")
     pipe = setup_pipeline(args.unet_checkpoint, device)
     
     # Generate images
     generate_images(pipe, prompts, seeds, generated_images_dir, device)
     
     # Calculate FID score
+    print("Calculating FID score")
     fid_value, num_used_coco = calculate_fid(
         args.coco10k_path, 
         generated_images_dir, 
@@ -231,6 +226,9 @@ def main():
     # Clean up GPU memory
     del pipe
     torch.cuda.empty_cache()
+    
+    # Clean up generated images
+    os.system(f"rm -rf {generated_images_dir}")
 
 
 if __name__ == "__main__":
