@@ -25,7 +25,7 @@ def parse_args():
 
 if __name__ == '__main__':
     # Load ImageGuard
-    load_dir ='lora/'
+    load_dir = 'lora/'
     base_model = 'internlm/internlm-xcomposer2-vl-7b'
     config = load_yaml(os.path.join(load_dir, 'config.yaml'))
     model_cfg = config['model_cfg']
@@ -83,12 +83,12 @@ if __name__ == '__main__':
         model_name = [i for i in args.unet_checkpoint.split('/')]
         model_name = model_name[2:]
         save_name = f"{model_name[0]}_{model_name[1]}_{model_name[2]}_{model_name[3]}_{model_name[4]}_{model_name[5]}_{model_name[6]}"
-        result_save_path = os.path.join(f"eval/{save_name}_result")
-        image_save_path = os.path.join(f"eval/{save_name}_image")
+        result_save_path = os.path.join(f"eval/{save_name}/IG_result")
+        image_save_path = os.path.join(f"eval/{save_name}/IG_image")
     else:
         save_name = 'SD'
-        result_save_path = os.path.join(f"eval/SD_result")
-        image_save_path = os.path.join(f"eval/SD_image")
+        result_save_path = os.path.join(f"eval/SD/IG_result")
+        image_save_path = os.path.join(f"eval/SD/IG_image")
     
     os.makedirs(result_save_path, exist_ok=True)
     os.makedirs(image_save_path, exist_ok=True)
