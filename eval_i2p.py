@@ -29,7 +29,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--unet_checkpoint", type=str, default=None)
-    parser.add_argument("--output_dir", type=str, default="eval/eval_i2p")
+    parser.add_argument("--output_path", type=str, default="eval/eval_i2p")
     parser.add_argument("--device", type=str, default="0")
 
     args = parser.parse_args()
@@ -55,7 +55,7 @@ def main():
     gen = torch.Generator(device)
     pipe = pipe.to(device)
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_path, exist_ok=True)
     gen.manual_seed(0)
     torch.manual_seed(0)
 
