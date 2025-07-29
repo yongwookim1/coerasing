@@ -1,6 +1,7 @@
 from utils.helpers import init_args
 from train.text_trainer import train_text_mode
 from train.image_trainer import train_image_mode
+from train.IL_trainer import train_IL_mode
 
 
 def main():
@@ -10,6 +11,8 @@ def main():
         train_text_mode(args)
     elif args.modality == 'image':
         train_image_mode(args)
+    elif args.modality == 'IL':
+        train_IL_mode(args)
     else:
         raise ValueError("Modality must be either 'text' or 'image'")
 

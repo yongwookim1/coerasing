@@ -19,9 +19,9 @@ def parse_args():
     parser.add_argument("--unet_checkpoint", type=str)
     parser.add_argument("--csv_path", type=str, default="prompts/coco_10k.csv")
     parser.add_argument("--coco10k_path", type=str, default="/home/dataset/coco2014/val2014")
-    parser.add_argument("--output_path", type=str, default="eval/fid_clip_comparison")
+    parser.add_argument("--output_path", type=str, default=None)
     parser.add_argument("--device", type=str, default="0")
-    parser.add_argument("--num_samples", type=int, default=2000, help="Number of images to generate and evaluate")
+    parser.add_argument("--num_samples", type=int, default=10000, help="Number of images to generate and evaluate")
     
     args = parser.parse_args()
     return args
@@ -170,6 +170,17 @@ def main():
     
     device = f"cuda:{args.device}" if torch.cuda.is_available() else "cpu"
     
+    # Generate output path based on unet_checkpoint (similar to generate_images.py)
+    if args.output_path is None:
+        if args.unet_checkpoint is not None:
+            save_path_instances = [i for i in args.unet_checkpoint.split('/')]
+            save_path_instances = save_path_instances[2:]
+            output_path = os.path.join(f"eval/{save_path_instances[0]}_{save_path_instances[1]}_{save_path_instances[2]}_{save_path_instances[3]}_{save_path_instances[4]}_{save_path_instances[5]}_{save_path_instances[6]}")
+        else:
+            output_path = os.path.join("eval/SD")
+    else:
+        output_path = args.output_path
+    
     # Load prompts and case numbers
     all_prompts, all_seeds, all_case_numbers = load_data(args.csv_path)
     
@@ -179,8 +190,8 @@ def main():
     case_numbers = all_case_numbers[:args.num_samples]
     
     # Setup output directories
-    generated_images_dir = os.path.join(args.output_path, "generated_images")
-    os.makedirs(args.output_path, exist_ok=True)
+    generated_images_dir = os.path.join(output_path, "generated_images")
+    os.makedirs(output_path, exist_ok=True)
     
     # Setup pipeline
     pipe = setup_pipeline(args.unet_checkpoint, device)
@@ -190,12 +201,12 @@ def main():
     
     # Calculate FID score
     print("Calculating FID score")
-    fid_value, num_used_coco = calculate_fid(
+    fid_value, _ = calculate_fid(
         args.coco10k_path, 
         generated_images_dir, 
         device, 
         case_numbers=case_numbers
-    )
+        )
     
     # Calculate CLIP scores
     print("Calculating CLIP scores")
@@ -206,18 +217,16 @@ def main():
     print("EVALUATION RESULTS")
     print("="*60)
     print(f"Number of samples evaluated: {len(prompts)}")
-    print(f"COCO images matched for FID: {num_used_coco}")
     print(f"FID Score: {fid_value:.2f}")
     print(f"CLIP Score: {clip_mean:.3f} ± {clip_std:.3f}")
     print("="*60)
     
     # Save results to file
-    results_file = os.path.join(args.output_path, "evaluation_results.txt")
+    results_file = os.path.join(output_path, "fid_clip_results.txt")
     with open(results_file, 'w') as f:
         f.write("EVALUATION RESULTS\n")
         f.write("="*60 + "\n")
         f.write(f"Number of samples evaluated: {len(prompts)}\n")
-        f.write(f"COCO images matched for FID: {num_used_coco}\n")
         f.write(f"FID Score: {fid_value:.2f}\n")
         f.write(f"CLIP Score: {clip_mean:.3f} ± {clip_std:.3f}\n")
     
@@ -227,8 +236,11 @@ def main():
     del pipe
     torch.cuda.empty_cache()
     
-    # Clean up generated images
+    # Clean up temporary folders
     os.system(f"rm -rf {generated_images_dir}")
+    coco_subset_dir = os.path.join(output_path, "coco_subset")
+    if os.path.exists(coco_subset_dir):
+        shutil.rmtree(coco_subset_dir)
 
 
 if __name__ == "__main__":

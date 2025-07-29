@@ -6,7 +6,7 @@ import torch
 def init_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--modality', type=str, choices=['text', 'image'], default='text')
+    parser.add_argument('--modality', type=str, choices=['text', 'image', 'IL'], default='text')
     parser.add_argument('--train_method', type=str, required=True)
     parser.add_argument('--prompt', type=str, required=True)
     parser.add_argument('--iterations', type=int, default=1000)

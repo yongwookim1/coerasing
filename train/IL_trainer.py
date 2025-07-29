@@ -32,7 +32,7 @@ transform = transforms.Compose([
 ])
 
 
-def train_image_mode(args):
+def train_IL_mode(args):
     # Device setup
     device_list = [f'cuda:{int(d.strip())}' for d in args.devices.split(',')]
     device_1 = torch.device(device_list[0])
@@ -130,58 +130,81 @@ def train_image_mode(args):
 
 
     # Prepare text embeddings
-    text_input_ids = tokenizer(args.prompt, return_tensors="pt", padding="max_length", truncation=True).input_ids
-    text_embeddings = text_encoder(text_input_ids.to(origin_unet.device))[0].to(unet.device)
+    forget_text_input_ids = tokenizer(args.prompt, return_tensors="pt", padding="max_length", truncation=True).input_ids
+    forget_text_embeddings = text_encoder(forget_text_input_ids.to(origin_unet.device))[0].to(unet.device)
+    
+    retain_text_input_ids = tokenizer("clothed", return_tensors="pt", padding="max_length", truncation=True).input_ids ### hard coding
+    retain_text_embeddings = text_encoder(retain_text_input_ids.to(origin_unet.device))[0].to(unet.device)
 
     uncond_input_ids = tokenizer("", return_tensors="pt", padding="max_length", truncation=True).input_ids
     uncond_text_embeddings = text_encoder(uncond_input_ids.to(origin_unet.device))[0].to(unet.device)
 
-    # Collect image embeddings (direct or contrastive)
-    use_direct_image = args.image is not None
-    use_contrastive = args.contrastive_image is not None
-    use_text_guide = args.text_guide is not None
-    assert use_direct_image or use_contrastive, "Set at least one image guidance method!"
+    forget_image_list = _load_image_list(args.forget_image_path, args.image_number)
+    retain_image_list = _load_image_list(args.retain_image_path, args.image_number)
+    print(f"[INFO] Found {len(forget_image_list)} images to erase from: {args.forget_image_path}")
+    print(f"[INFO] Found {len(retain_image_list)} images to erase from: {args.retain_image_path}")
 
-    if use_direct_image:
-        image_list = _load_image_list(args.image, args.image_number)
-        print(f"[INFO] Found {len(image_list)} images to erase from: {args.image}")
-
-    if use_contrastive:
-        concept_embeds = _collect_contrastive_embeddings(args, image_encoder)
-        concept_embed_tensor = torch.mean(torch.stack(concept_embeds), dim=0)
-
+    text_condition = True
     # Training loop
     for idx in tqdm(range(args.iterations), desc="[Image Training]"):
         optimizer.zero_grad()
+        
+        # Use text condition
+        if text_condition:
+            prompt = args.prompt
+            input_ids = tokenizer(prompt, return_tensors="pt", padding="max_length", truncation=True).input_ids
+            text_embed = text_encoder(input_ids.to(origin_unet.device))[0].to(unet.device)
+        
+        else:
+            # Sample forget image embedding
+            forget_image_embeds = _sample_image_embedding(forget_image_list, image_encoder)
 
-        # Sample image embedding
-        if use_direct_image:
-            image_embeds = _sample_image_embedding(image_list, image_encoder)
-
-        elif use_contrastive:
-            image_embeds = _sample_contrastive_embedding(args, concept_embeds, concept_embed_tensor)
-
-        if use_text_guide:
-            key = text_embeddings
-            query = origin_ip_adapter.image_proj_model(image_embeds)
-            value = key
+            forget_key = forget_text_embeddings
+            forget_query = origin_ip_adapter.image_proj_model(forget_image_embeds)
+            forget_value = forget_key
             
-            attention_scores = torch.matmul(query.to(origin_unet.device), key.to(origin_unet.device).transpose(1, 2))
+            attention_scores = torch.matmul(forget_query.to(origin_unet.device), forget_key.to(origin_unet.device).transpose(1, 2))
             # Scale the attention scores
-            d_k = key.size(-1)  # embedding_dim
+            d_k = forget_key.size(-1)  # embedding_dim
             scaled_attention_scores = attention_scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
             
             # Apply softmax to get the attention weights
             attention_weights = F.softmax(scaled_attention_scores, dim=-1)  # Shape: [batch_size, 1, num_patches]
             
             # Compute the weighted sum of the image embeddings (weighted by attention)
-            attended_image_embedding = torch.matmul(attention_weights, value.to(origin_unet.device))  # Shape: [batch_size, 1, embedding_dim]
-            image_embeds = attended_image_embedding
+            attended_image_embedding = torch.matmul(attention_weights, forget_value.to(origin_unet.device))  # Shape: [batch_size, 1, embedding_dim]
+            forget_image_embeds = attended_image_embedding
+            forget_image_embeds = forget_image_embeds.to(unet.device)
+
+            # Add noise to image embedding if specified
+            if args.noise_factor > 0:
+                noise = torch.rand_like(forget_image_embeds)
+                forget_image_embeds = forget_image_embeds + args.noise_factor * noise
+            
+        # Sample retain image embedding
+        retain_image_embeds = _sample_image_embedding(retain_image_list, image_encoder)
+
+        retain_key = retain_text_embeddings
+        retain_query = origin_ip_adapter.image_proj_model(retain_image_embeds)
+        retain_value = retain_key
+        
+        attention_scores = torch.matmul(retain_query.to(origin_unet.device), retain_key.to(origin_unet.device).transpose(1, 2))
+        # Scale the attention scores
+        d_k = retain_key.size(-1)  # embedding_dim
+        scaled_attention_scores = attention_scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+        
+        # Apply softmax to get the attention weights
+        attention_weights = F.softmax(scaled_attention_scores, dim=-1)  # Shape: [batch_size, 1, num_patches]
+        
+        # Compute the weighted sum of the image embeddings (weighted by attention)
+        attended_image_embedding = torch.matmul(attention_weights, retain_value.to(origin_unet.device))  # Shape: [batch_size, 1, embedding_dim]
+        retain_image_embeds = attended_image_embedding
+        retain_image_embeds = retain_image_embeds.to(unet.device)
 
         # Add noise to image embedding if specified
         if args.noise_factor > 0:
-            noise = torch.rand_like(image_embeds)
-            image_embeds = image_embeds + args.noise_factor * noise
+            noise = torch.rand_like(retain_image_embeds)
+            retain_image_embeds = retain_image_embeds + args.noise_factor * noise
 
         # Sample timestep
         t = torch.randint(num_inference_steps, (1,)).to(unet.device)
@@ -192,17 +215,24 @@ def train_image_mode(args):
 
         with torch.no_grad():
             set_scheduler_device(noise_scheduler, unet.device)
-            z = denoise_to_text_timestep(unet, text_embeddings, t, start_code, noise_scheduler)
+            if text_condition:
+                z = denoise_to_text_timestep(unet, text_embed, t, start_code, noise_scheduler)
+            else:
+                z = denoise_to_text_timestep(unet, forget_image_embeds, t, start_code, noise_scheduler)
+
             if args.blur_factor > 0:
                 z = torchvision.transforms.functional.gaussian_blur(z, kernel_size=args.blur_factor)
-
-            cond_origin_noise = predict_image_t_noise(z, t_ddpm, origin_unet, text_embeddings, origin_ip_adapter, image_embeds)
-            if args.text_uncond:
-                uncond_origin_noise = predict_text_t_noise(z, t_ddpm, origin_unet, uncond_text_embeddings)
+            
+            if text_condition:
+                cond_origin_noise = predict_text_t_noise(z, t_ddpm, origin_unet, text_embed)
             else:
-                uncond_origin_noise = predict_image_t_noise(z, t_ddpm, origin_unet, uncond_text_embeddings, origin_ip_adapter, image_embeds)
+                cond_origin_noise = predict_image_t_noise(z, t_ddpm, origin_unet, forget_image_embeds, origin_ip_adapter, forget_image_embeds)
+            uncond_origin_noise = predict_image_t_noise(z, t_ddpm, origin_unet, retain_image_embeds, origin_ip_adapter, retain_image_embeds)
 
-        cond_noise = predict_image_t_noise(z, t_ddpm, unet, text_embeddings, ip_adapter, image_embeds)
+        if text_condition:
+            cond_noise = predict_text_t_noise(z, t_ddpm, unet, text_embed)
+        else:
+            cond_noise = predict_image_t_noise(z, t_ddpm, unet, forget_text_embeddings, ip_adapter, forget_image_embeds)
 
         # Compute loss
         cond_noise, uncond_origin_noise, cond_origin_noise = to_same_device(

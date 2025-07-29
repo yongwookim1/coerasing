@@ -42,9 +42,12 @@ def main():
     torch.manual_seed(0)
     
     if args.unet_checkpoint is not None:
-        save_path_instances = [i for i in args.unet_checkpoint.split('/')]
-        save_path_instances = save_path_instances[2:]
-        save_path = os.path.join(f"eval/{save_path_instances[0]}_{save_path_instances[1]}_{save_path_instances[2]}_{save_path_instances[3]}_{save_path_instances[4]}_{save_path_instances[5]}_{save_path_instances[6]}")
+        try:
+            save_path_instances = [i for i in args.unet_checkpoint.split('/')]
+            save_path_instances = save_path_instances[2:]
+            save_path = os.path.join(f"eval/{save_path_instances[0]}_{save_path_instances[1]}_{save_path_instances[2]}_{save_path_instances[3]}_{save_path_instances[4]}_{save_path_instances[5]}_{save_path_instances[6]}")
+        except:
+            save_path = "eval/Co-Erasing"
     else:
         save_path = os.path.join("eval/SD")
     
