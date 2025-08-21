@@ -24,9 +24,9 @@ def parse_arguments():
     
     # Training arguments - Modified to use all styles and data by default
     parser.add_argument("--styles", nargs="+", default=None)
-    parser.add_argument("--epochs", type=int, default=100)
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=0.0002)
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--lr", type=float, default=0.001)
     parser.add_argument("--max_samples_per_class", type=int, default=None)
     parser.add_argument("--save_interval", type=int, default=10)
     

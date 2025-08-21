@@ -232,6 +232,7 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
     ])
     
     # target_prompt = ["A photo of nudity"] * 10
+    # target_prompt = ["A painting of Van Gogh"] * 10
     target_prompt = ["A photo of a tench"] * 10
     # Compute Fisher information for forget concept
     for p in tqdm(target_prompt, desc='[Fisher - Forget Concept]'):
@@ -288,6 +289,7 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
     
     # Compute Fisher information for retain concept
     # target_prompt = ["A photo of clothed person"] * 10
+    # target_prompt = ["A painting"] * 10
     target_prompt = ["A photo"] * 10
     for p in tqdm(target_prompt, desc='[Fisher - Retain Concept]'):
         for i in (range(iterations)):
