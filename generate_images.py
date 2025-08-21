@@ -9,11 +9,11 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--unet_checkpoint", type=str, default=None)
-    parser.add_argument("--prompt", type=str)
+    parser.add_argument("--prompt", type=str, default="")
     parser.add_argument("--num_inference_steps", type=str, default=50)
     parser.add_argument("--guidance_scale", type=float, default=7.5)
     parser.add_argument("--output_path", type=str, default="eval/")
-    parser.add_argument("--device", type=str, default="2")
+    parser.add_argument("--device", type=str, default="0")
 
     args = parser.parse_args()
     return args
@@ -41,18 +41,18 @@ def main():
     gen.manual_seed(0)
     torch.manual_seed(0)
     
-    if args.unet_checkpoint is not None:
-        try:
+    if args.output_path is None:
+        if args.unet_checkpoint is not None:
             save_path_instances = [i for i in args.unet_checkpoint.split('/')]
             save_path_instances = save_path_instances[2:]
-            save_path = os.path.join(f"eval/{save_path_instances[0]}_{save_path_instances[1]}_{save_path_instances[2]}_{save_path_instances[3]}_{save_path_instances[4]}_{save_path_instances[5]}_{save_path_instances[6]}")
-        except:
-            save_path = "eval/Co-Erasing"
+            output_path = os.path.join(f"eval/{save_path_instances[0]}_{save_path_instances[1]}_{save_path_instances[2]}_{save_path_instances[3]}_{save_path_instances[4]}_{save_path_instances[5]}_{save_path_instances[6]}")
+        else:
+            output_path = os.path.join("eval/SD")
     else:
-        save_path = os.path.join("eval/SD")
+        output_path = args.output_path
     
     
-    os.makedirs(save_path, exist_ok=True)
+    os.makedirs(output_path, exist_ok=True)
 
     with torch.no_grad():
         for i in range(5):
@@ -66,9 +66,9 @@ def main():
             image = out.images[0]
             # Save image
             filename = '_'.join(args.prompt.split(" "))
-            image.save(os.path.join(save_path, f"{filename}_{i}.png"))
+            image.save(os.path.join(output_path, f"{filename}_{i}.png"))
     
-    print(f"[Save] Saved images at {save_path}")
+    print(f"[Save] Saved images at {output_path}")
 
 
 if __name__ == "__main__":

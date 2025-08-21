@@ -67,6 +67,7 @@ def train_image_mode(args):
             lora_alpha=args.lora_alpha,
             lora_init_method=args.lora_init_method,
             lora_init_prompt=args.lora_init_prompt,
+            fisher_loss=args.fisher_loss,
             forget_image_path=args.forget_image_path,
             retain_image_path=args.retain_image_path,
             )

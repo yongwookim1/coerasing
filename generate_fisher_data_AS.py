@@ -9,35 +9,16 @@ import numpy as np
 import torch
 from diffusers import StableDiffusionPipeline, StableDiffusionControlNetPipeline, ControlNetModel
 
+from prompts.vangogh_prompts import vangogh_prompts
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_path", type=str, default="CompVis/stable-diffusion-v1-4")
     parser.add_argument("--numbers_per_class", type=int, default=1)
-    parser.add_argument("--device", type=str, default="4,0")
+    parser.add_argument("--device", type=str, default="0,1")
     
     return parser.parse_args()
-
-
-def load_vangogh_prompts():
-    vangogh_prompts = [
-        "a beautiful landscape in the style of Van Gogh, swirling brushstrokes, vibrant colors",
-        "a starry night scene in Van Gogh style, thick impasto texture, dynamic brushwork",
-        "a sunflower field painted in Van Gogh style, bold yellow colors, expressive strokes",
-        "a village scene in Van Gogh style, post-impressionist painting, textured brushstrokes",
-        "a self-portrait in Van Gogh style, intense colors, emotional brushwork",
-        "a cafe terrace at night in Van Gogh style, vivid colors, swirling patterns",
-        "a wheat field with cypresses in Van Gogh style, dramatic sky, thick paint texture",
-        "a bedroom interior in Van Gogh style, simple furniture, bold outlines",
-        "a bridge over water in Van Gogh style, flowing brushstrokes, impressionist technique",
-        "a garden scene in Van Gogh style, colorful flowers, energetic painting style",
-        "a street scene in Van Gogh style, vibrant atmosphere, post-impressionist technique",
-        "a portrait of a peasant in Van Gogh style, earthy colors, expressive face",
-        "a still life with fruit in Van Gogh style, bold colors, thick brushstrokes",
-        "a church in a village in Van Gogh style, dramatic lighting, swirling sky",
-        "a Japanese bridge in Van Gogh style, water lilies, impressionist brushwork"
-    ]
-    return vangogh_prompts
 
 
 def setup_pipelines(model_path, device_0, device_1):
@@ -64,7 +45,7 @@ def setup_pipelines(model_path, device_0, device_1):
     return txt2img_pipeline, controlnet_pipeline
 
 
-def extract_canny_edges(image, edge_threshold=10, edge_intensity=0.1, blur_radius=1):
+def extract_canny_edges(image, edge_threshold=5, edge_intensity=0.1, blur_radius=1):
     if image.mode != 'L':
         gray_image = image.convert('L')
     else:
@@ -86,8 +67,6 @@ def extract_canny_edges(image, edge_threshold=10, edge_intensity=0.1, blur_radiu
     
     # Convert back to PIL and apply additional blur for softer edges
     edges_pil = Image.fromarray(edges_np)
-    if blur_radius > 0:
-        edges_pil = edges_pil.filter(ImageFilter.GaussianBlur(radius=blur_radius * 0.5))
     
     # Convert to RGB
     edges_pil = edges_pil.convert("RGB")
@@ -148,7 +127,7 @@ def generate_forget_image(txt2img_pipeline, prompt, generator):
 
 def generate_retain_image(controlnet_pipeline, canny_edges, vangogh_prompt, seed, device_1):
     content_prompt = clean_prompt_for_content(vangogh_prompt)
-    retain_prompt = f"painting of {content_prompt}, artistic, high quality, detailed"
+    retain_prompt = f"A painting, realistic, high quality, detailed"
     
     retain_image = controlnet_pipeline(
         prompt=retain_prompt,
@@ -198,9 +177,9 @@ def generate_paired_data(prompts, txt2img_pipeline, controlnet_pipeline, forget_
             # Extract very subtle Canny edges from Van Gogh image
             canny_edges = extract_canny_edges(
                 forget_image, 
-                edge_threshold=20,
-                edge_intensity=0.2,
-                blur_radius=2
+                edge_threshold=125,
+                edge_intensity=1,
+                blur_radius=1.0
             )
             
             # Save Canny edges for inspection ###################
@@ -225,8 +204,6 @@ def main():
     args = parse_args()
     device_0, device_1 = args.device.split(',')
     
-    vangogh_prompts = load_vangogh_prompts()
-    
     txt2img_pipeline, controlnet_pipeline = setup_pipelines(args.model_path, device_0, device_1)
     
     root_dir = "./data/"
@@ -247,12 +224,10 @@ def main():
         device_0,
         device_1
     )
-    
-    print("Generation completed!")
-    print(f"Van Gogh style images saved in: {forget_save_dir}")
-    print(f"Style-removed images saved in: {retain_save_dir}")
-    print(f"Comparison images saved in: {comparison_save_dir}")
-    print(f"Canny edges saved in: {canny_save_dir}")
+    print(f"Van Gogh style data saved to: {forget_save_dir}")
+    print(f"Style-removed data saved to: {retain_save_dir}")
+    print(f"Comparison data saved to: {comparison_save_dir}")
+    print(f"Canny edges saved to: {canny_save_dir}")
 
 
 if __name__ == "__main__":

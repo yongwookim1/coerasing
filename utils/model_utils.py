@@ -128,6 +128,84 @@ def _get_hook_factory(lora_module):
     return hook
 
 
+def compute_esd_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, target_prompt, module_names, forget_image_path=None, retain_image_path=None, iteration=30):
+    # Move models to device and set device memory
+    origin_text_encoder_device = text_encoder.device
+    text_encoder = text_encoder.to(device)
+    unet = unet.to(device)
+    vae = vae.to(device)
+    
+    # Initialize Fisher information dictionary
+    fisher_info = {name: torch.zeros_like(dict(unet.named_modules())[name].weight) for name in module_names}
+    
+    unet.eval()
+    vae.eval()
+    text_encoder.eval()
+    criteria = torch.nn.MSELoss()
+    iterations = iteration
+    
+    # Prepare prompts - assuming target_prompt is a list of tuples (positive, target)
+    prompts = target_prompt if isinstance(target_prompt, list) else [target_prompt]
+    
+    for i in tqdm(range(iterations), desc='Computing ESD Fisher Information'):
+        with torch.no_grad():
+            index = np.random.choice(len(prompts), 1, replace=False)[0]
+            erase_concept_sampled = prompts[index]
+            
+            # Prepare text embeddings using tokenizer and text_encoder
+            neutral_tokens = tokenizer([""], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            neutral_text_embeddings = text_encoder(neutral_tokens.input_ids.to(device))[0]
+            
+            positive_tokens = tokenizer([erase_concept_sampled[0]], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            positive_text_embeddings = text_encoder(positive_tokens.input_ids.to(device))[0]
+            
+            target_tokens = tokenizer([erase_concept_sampled[1]], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            target_text_embeddings = text_encoder(target_tokens.input_ids.to(device))[0]
+            
+            # Generate random latents
+            latents = torch.randn(1, 4, 64, 64, device=device)  # Standard SD latent dimensions
+            
+            # Sample random timestep
+            t = torch.randint(0, scheduler.config.num_train_timesteps, (1,), device=device).long()
+            
+            # Add noise
+            noise = torch.randn_like(latents)
+            noisy_latents = scheduler.add_noise(latents, noise, t)
+            
+            if erase_concept_sampled[0] == erase_concept_sampled[1]:
+                target_text_embeddings = neutral_text_embeddings.clone().detach()
+        
+        # Forward pass with different embeddings - enable gradients for loss computation
+        noisy_latents.requires_grad = True
+        
+        # Clear gradients
+        unet.zero_grad()
+        
+        # Predict noise with different text embeddings
+        positive_noise_pred = unet(noisy_latents, t, encoder_hidden_states=positive_text_embeddings).sample
+        neutral_noise_pred = unet(noisy_latents, t, encoder_hidden_states=neutral_text_embeddings).sample
+        target_noise_pred = unet(noisy_latents, t, encoder_hidden_states=target_text_embeddings).sample
+        
+        # ESD loss computation
+        loss = criteria(target_noise_pred, target_noise_pred - (positive_noise_pred - neutral_noise_pred))
+        
+        loss.backward()
+        
+        for name in module_names:
+            module = dict(unet.named_modules())[name]
+            if hasattr(module, 'weight') and module.weight.grad is not None:
+                fisher_info[name] += module.weight.grad.data.pow(2)
+    
+    # Normalize Fisher information
+    for name in fisher_info:
+        fisher_info[name] /= iterations
+    
+    # Restore original device
+    text_encoder.to(origin_text_encoder_device)
+    
+    return fisher_info
+
+
 def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, target_prompt, module_names, forget_image_path, retain_image_path, iterations=30):
     origin_text_encoder_device = text_encoder.device
     text_encoder = text_encoder.to(device)
@@ -153,7 +231,8 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
         transforms.Normalize([0.5], [0.5])
     ])
     
-    target_prompt = ["A photo of nudity"] * 10
+    # target_prompt = ["A photo of nudity"] * 10
+    target_prompt = ["A photo of a tench"] * 10
     # Compute Fisher information for forget concept
     for p in tqdm(target_prompt, desc='[Fisher - Forget Concept]'):
         for i in range(iterations):
@@ -208,7 +287,8 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
                     forget_fisher_info[name] += module.weight.grad.data.pow(2)
     
     # Compute Fisher information for retain concept
-    target_prompt = ["A photo of clothed person"] * 10
+    # target_prompt = ["A photo of clothed person"] * 10
+    target_prompt = ["A photo"] * 10
     for p in tqdm(target_prompt, desc='[Fisher - Retain Concept]'):
         for i in (range(iterations)):
             image_path = np.random.choice(retain_image_paths)
@@ -276,7 +356,7 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
     return fisher_info
 
 
-def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, scheduler=None, device=None, train_method='xattn', lora_rank=4, lora_alpha=1.0, lora_init_method=None, lora_init_prompt=None, forget_image_path=None, retain_image_path=None):
+def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, scheduler=None, device=None, train_method='xattn', lora_rank=4, lora_alpha=1.0, lora_init_method=None, lora_init_prompt=None, fisher_loss='mse', forget_image_path=None, retain_image_path=None):
     lora_modules = torch.nn.ModuleDict()
     module_names = []
     for name, module in unet.named_modules():
@@ -298,8 +378,10 @@ def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, schedule
             raise NotImplementedError(f"train_method: {train_method} is not implemented for LoRA.")
         module_names.append(name)
     fisher_info_dict = None
-    if lora_init_method == 'fisher' and lora_init_prompt is not None:
+    if lora_init_method == 'fisher' and lora_init_prompt is not None and fisher_loss == 'mse':
         fisher_info_dict = compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, lora_init_prompt, module_names, forget_image_path, retain_image_path)
+    elif lora_init_method == 'fisher' and lora_init_prompt is not None and fisher_loss == 'esd':
+        fisher_info_dict = compute_esd_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, device, lora_init_prompt, module_names)
     
     lora_scale = lora_alpha / lora_rank
     

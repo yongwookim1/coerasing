@@ -69,6 +69,7 @@ def train_IL_mode(args):
             lora_init_prompt=args.lora_init_prompt,
             forget_image_path=args.forget_image_path,
             retain_image_path=args.retain_image_path,
+            fisher_loss=args.fisher_loss,
             )
         if args.lora_ckpt_path:
             lora_modules.load_state_dict(torch.load(args.lora_ckpt_path))
@@ -133,7 +134,9 @@ def train_IL_mode(args):
     forget_text_input_ids = tokenizer(args.prompt, return_tensors="pt", padding="max_length", truncation=True).input_ids
     forget_text_embeddings = text_encoder(forget_text_input_ids.to(origin_unet.device))[0].to(unet.device)
     
-    retain_text_input_ids = tokenizer("clothed", return_tensors="pt", padding="max_length", truncation=True).input_ids ### hard coding
+    # Retain prompt for tench erasing - change this to what you want to keep
+    retain_prompt = ""  # Change this for different retain concepts
+    retain_text_input_ids = tokenizer(retain_prompt, return_tensors="pt", padding="max_length", truncation=True).input_ids
     retain_text_embeddings = text_encoder(retain_text_input_ids.to(origin_unet.device))[0].to(unet.device)
 
     uncond_input_ids = tokenizer("", return_tensors="pt", padding="max_length", truncation=True).input_ids
@@ -144,7 +147,10 @@ def train_IL_mode(args):
     print(f"[INFO] Found {len(forget_image_list)} images to erase from: {args.forget_image_path}")
     print(f"[INFO] Found {len(retain_image_list)} images to erase from: {args.retain_image_path}")
 
-    text_condition = True
+    # Set to True for text-based training, False for image-based training
+    text_condition = False  # Change this to True if you want text-based training
+    # Set to True to use attention mechanism, False to use direct embeddings
+    use_attention = False  # Change this to False if you want to skip attention
     # Training loop
     for idx in tqdm(range(args.iterations), desc="[Image Training]"):
         optimizer.zero_grad()
@@ -159,22 +165,26 @@ def train_IL_mode(args):
             # Sample forget image embedding
             forget_image_embeds = _sample_image_embedding(forget_image_list, image_encoder)
 
-            forget_key = forget_text_embeddings
-            forget_query = origin_ip_adapter.image_proj_model(forget_image_embeds)
-            forget_value = forget_key
-            
-            attention_scores = torch.matmul(forget_query.to(origin_unet.device), forget_key.to(origin_unet.device).transpose(1, 2))
-            # Scale the attention scores
-            d_k = forget_key.size(-1)  # embedding_dim
-            scaled_attention_scores = attention_scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
-            
-            # Apply softmax to get the attention weights
-            attention_weights = F.softmax(scaled_attention_scores, dim=-1)  # Shape: [batch_size, 1, num_patches]
-            
-            # Compute the weighted sum of the image embeddings (weighted by attention)
-            attended_image_embedding = torch.matmul(attention_weights, forget_value.to(origin_unet.device))  # Shape: [batch_size, 1, embedding_dim]
-            forget_image_embeds = attended_image_embedding
-            forget_image_embeds = forget_image_embeds.to(unet.device)
+            if use_attention:
+                forget_key = forget_text_embeddings
+                forget_query = origin_ip_adapter.image_proj_model(forget_image_embeds)
+                forget_value = forget_key
+                
+                attention_scores = torch.matmul(forget_query.to(origin_unet.device), forget_key.to(origin_unet.device).transpose(1, 2))
+                # Scale the attention scores
+                d_k = forget_key.size(-1)  # embedding_dim
+                scaled_attention_scores = attention_scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+                
+                # Apply softmax to get the attention weights
+                attention_weights = F.softmax(scaled_attention_scores, dim=-1)  # Shape: [batch_size, 1, num_patches]
+                
+                # Compute the weighted sum of the image embeddings (weighted by attention)
+                attended_image_embedding = torch.matmul(attention_weights, forget_value.to(origin_unet.device))  # Shape: [batch_size, 1, embedding_dim]
+                forget_image_embeds = attended_image_embedding
+                forget_image_embeds = forget_image_embeds.to(unet.device)
+            else:
+                # Use direct image embeddings without attention
+                forget_image_embeds = origin_ip_adapter.image_proj_model(forget_image_embeds).to(unet.device)
 
             # Add noise to image embedding if specified
             if args.noise_factor > 0:
@@ -184,22 +194,26 @@ def train_IL_mode(args):
         # Sample retain image embedding
         retain_image_embeds = _sample_image_embedding(retain_image_list, image_encoder)
 
-        retain_key = retain_text_embeddings
-        retain_query = origin_ip_adapter.image_proj_model(retain_image_embeds)
-        retain_value = retain_key
-        
-        attention_scores = torch.matmul(retain_query.to(origin_unet.device), retain_key.to(origin_unet.device).transpose(1, 2))
-        # Scale the attention scores
-        d_k = retain_key.size(-1)  # embedding_dim
-        scaled_attention_scores = attention_scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
-        
-        # Apply softmax to get the attention weights
-        attention_weights = F.softmax(scaled_attention_scores, dim=-1)  # Shape: [batch_size, 1, num_patches]
-        
-        # Compute the weighted sum of the image embeddings (weighted by attention)
-        attended_image_embedding = torch.matmul(attention_weights, retain_value.to(origin_unet.device))  # Shape: [batch_size, 1, embedding_dim]
-        retain_image_embeds = attended_image_embedding
-        retain_image_embeds = retain_image_embeds.to(unet.device)
+        if use_attention:
+            retain_key = retain_text_embeddings
+            retain_query = origin_ip_adapter.image_proj_model(retain_image_embeds)
+            retain_value = retain_key
+            
+            attention_scores = torch.matmul(retain_query.to(origin_unet.device), retain_key.to(origin_unet.device).transpose(1, 2))
+            # Scale the attention scores
+            d_k = retain_key.size(-1)  # embedding_dim
+            scaled_attention_scores = attention_scores / torch.sqrt(torch.tensor(d_k, dtype=torch.float32))
+            
+            # Apply softmax to get the attention weights
+            attention_weights = F.softmax(scaled_attention_scores, dim=-1)  # Shape: [batch_size, 1, num_patches]
+            
+            # Compute the weighted sum of the image embeddings (weighted by attention)
+            attended_image_embedding = torch.matmul(attention_weights, retain_value.to(origin_unet.device))  # Shape: [batch_size, 1, embedding_dim]
+            retain_image_embeds = attended_image_embedding
+            retain_image_embeds = retain_image_embeds.to(unet.device)
+        else:
+            # Use direct image embeddings without attention
+            retain_image_embeds = origin_ip_adapter.image_proj_model(retain_image_embeds).to(unet.device)
 
         # Add noise to image embedding if specified
         if args.noise_factor > 0:

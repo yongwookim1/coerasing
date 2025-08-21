@@ -4,10 +4,14 @@ eval/
 models/
 data/
 test/
-*.sh
+prompts/
+
 /ImageGuard/lora/*.safetensors
 /ImageGuard/lora/*.bin
 /ImageGuard/lora/*.model
+
+*.sh
+*.png
 
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python

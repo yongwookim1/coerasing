@@ -40,6 +40,7 @@ def init_args():
     parser.add_argument('--lora_ckpt_path', type=str, default=None)
     parser.add_argument('--remained_unet_ckpt_path', type=str, default=None)
     parser.add_argument('--lora_init_prompt', type=str, default=None)
+    parser.add_argument('--fisher_loss', type=str, default='mse')
     
     return parser.parse_args()
 
