@@ -231,9 +231,15 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
         transforms.Normalize([0.5], [0.5])
     ])
     
-    # target_prompt = ["A photo of nudity"] * 10
-    # target_prompt = ["A painting of Van Gogh"] * 10
-    target_prompt = ["A photo of a tench"] * 10
+    if target_prompt == "van_gogh":
+        target_prompt = ["A painting of Van Gogh"] * 10
+    elif target_prompt == "tench":
+        target_prompt = ["A photo of a tench"] * 10
+    elif target_prompt == "nudity":
+        target_prompt = ["A photo of nudity"] * 10
+    else:
+        target_prompt = ["A photo"] * 10
+    
     # Compute Fisher information for forget concept
     for p in tqdm(target_prompt, desc='[Fisher - Forget Concept]'):
         for i in range(iterations):
@@ -288,9 +294,15 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
                     forget_fisher_info[name] += module.weight.grad.data.pow(2)
     
     # Compute Fisher information for retain concept
-    # target_prompt = ["A photo of clothed person"] * 10
-    # target_prompt = ["A painting"] * 10
-    target_prompt = ["A photo"] * 10
+    if target_prompt == "van_gogh":
+        target_prompt = ["A painting"] * 10
+    elif target_prompt == "tench":
+        target_prompt = ["A photo"] * 10
+    elif target_prompt == "nudity":
+        target_prompt = ["A photo of clothed person"] * 10
+    else:
+        target_prompt = ["A photo"] * 10
+
     for p in tqdm(target_prompt, desc='[Fisher - Retain Concept]'):
         for i in (range(iterations)):
             image_path = np.random.choice(retain_image_paths)

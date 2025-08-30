@@ -33,12 +33,10 @@ transform = transforms.Compose([
 
 
 def train_IL_mode(args):
-    # Device setup
     device_list = [f'cuda:{int(d.strip())}' for d in args.devices.split(',')]
     device_1 = torch.device(device_list[0])
     device_2 = torch.device(device_list[1])
 
-    # Load models
     origin_unet = load_unet(args.ckpt_path, requires_grad=False).to(device_1)
     unet = load_unet(args.ckpt_path, requires_grad=True).to(device_2)
 
@@ -53,7 +51,6 @@ def train_IL_mode(args):
     vae, tokenizer, text_encoder, noise_scheduler, _ = load_others(args.ckpt_path, requires_grad=False)
     text_encoder = text_encoder.to(origin_unet.device)
 
-    # Init optimizer
     if args.lora_init_method is not None:
         lora_modules = add_lora_to_unet(
             unet,
@@ -79,13 +76,13 @@ def train_IL_mode(args):
         parameters = lora_modules.parameters()
     else:
         parameters = get_training_params(unet, args.train_method)
+    
     optimizer = torch.optim.Adam(parameters, lr=args.lr)
     criterion = torch.nn.MSELoss()
     num_inference_steps = args.num_inference_steps
 
     noise_scheduler.set_timesteps(num_inference_steps)
 
-    # Define save path
     save_path = args.save_path or os.path.join("checkpoints", args.modality, args.prompt, args.train_method, str(args.lr))
     if args.lora_init_method == None:
         unet_save_path = os.path.join(save_path, "unet")
@@ -97,12 +94,9 @@ def train_IL_mode(args):
         lora_save_path = os.path.join(save_path, str(args.lora_rank), "fisher", args.forget_image_path.split('/')[-1])
         os.makedirs(lora_save_path, exist_ok=True)
 
-
-    # Image encoder
     image_encoder = CLIPVisionModelWithProjection.from_pretrained(args.image_encoder_path).to(origin_unet.device)
     image_encoder.requires_grad_(False)
 
-    # Image projection models
     image_proj_model = ImageProjModel(
         cross_attention_dim=unet.config.cross_attention_dim,
         clip_embeddings_dim=image_encoder.config.projection_dim,
@@ -129,13 +123,11 @@ def train_IL_mode(args):
     ip_adapter = IPAdapter(unet, image_proj_model, adapter_modules, ip_adapter_path).to(unet.device)
     origin_ip_adapter = IPAdapter(origin_unet, origin_image_proj_model, origin_adapter_modules, ip_adapter_path).to(origin_unet.device)
 
-
     # Prepare text embeddings
     forget_text_input_ids = tokenizer(args.prompt, return_tensors="pt", padding="max_length", truncation=True).input_ids
     forget_text_embeddings = text_encoder(forget_text_input_ids.to(origin_unet.device))[0].to(unet.device)
     
-    # Retain prompt for tench erasing - change this to what you want to keep
-    retain_prompt = ""  # Change this for different retain concepts
+    retain_prompt = ""
     retain_text_input_ids = tokenizer(retain_prompt, return_tensors="pt", padding="max_length", truncation=True).input_ids
     retain_text_embeddings = text_encoder(retain_text_input_ids.to(origin_unet.device))[0].to(unet.device)
 

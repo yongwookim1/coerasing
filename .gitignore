@@ -5,6 +5,7 @@ models/
 data/
 test/
 prompts/
+results/
 
 /ImageGuard/lora/*.safetensors
 /ImageGuard/lora/*.bin
