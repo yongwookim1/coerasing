@@ -67,4 +67,4 @@ If you have any detailed questions or suggestions, feel free to email us: [lifei
 
 ## Acknowledgement
 
-This repository is built upon the great works of [ESD](https://github.com/rohitgandikota/erasing) and [Co‑Erasing](https://github.com/rohitgandikota/erasing).
+This repository is built upon the great works of [ESD](https://github.com/rohitgandikota/erasing) and [Co‑Erasing](https://github.com/Ferry-Li/Co-Erasing).
