@@ -1,0 +1,1 @@
+tench_prompts = ["A photo of tench"] * 100
