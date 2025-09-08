@@ -3,6 +3,7 @@ import json
 import torch
 import time
 import numpy as np
+import random
 import argparse
 from PIL import Image
 from diffusers import StableDiffusionPipeline
