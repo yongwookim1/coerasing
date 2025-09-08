@@ -4,8 +4,10 @@ eval/
 models/
 data/
 test/
-prompts/
 results/
+edges/
+unlearncanvas/
+exp/
 
 /ImageGuard/lora/*.safetensors
 /ImageGuard/lora/*.bin

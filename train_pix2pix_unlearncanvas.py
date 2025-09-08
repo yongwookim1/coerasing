@@ -211,6 +211,7 @@ class UnlearnCanvasDataset(Dataset):
         print(f"Dataset loaded: {len(self.data_pairs)} image pairs")
 
         if cache_edges:
+            # If external edge directory is provided, preload edges from there
             if disk_cache:
                 os.makedirs(self.edge_cache_dir, exist_ok=True)
                 if self._load_all_edges_from_disk():
@@ -262,6 +263,8 @@ class UnlearnCanvasDataset(Dataset):
 
     def _load_or_compute_edge(self, image_path, prefix=""):
         """Load edge from cache or compute and save it"""
+        # If an external edge directory is provided, prefer loading from it
+
         cache_path = self._get_edge_cache_path(image_path, prefix)
 
         if os.path.exists(cache_path):
@@ -330,6 +333,70 @@ class UnlearnCanvasDataset(Dataset):
             seed_edges_tensor = self.transform(seed_edges_pil)
             styled_edges_tensor = self.transform(styled_edges_pil)
 
+            self.edge_cache[i] = (styled_edges_tensor, seed_edges_tensor)
+
+    def _find_external_edge_path(self, image_path):
+        """Map an original image path to the corresponding precomputed edge file under edge_root.
+
+        Tries multiple common extensions and returns the first existing path, or None if not found.
+        """
+
+        rel_path = os.path.relpath(image_path, self.dataset_root)
+        base_dir = os.path.dirname(rel_path)
+        base_name = os.path.splitext(os.path.basename(rel_path))[0]
+        original_ext = os.path.splitext(os.path.basename(rel_path))[1].lower()
+
+        candidate_names = [
+            f"{base_name}{original_ext}",
+            f"{base_name}.png",
+            f"{base_name}.jpg",
+            f"{base_name}.jpeg",
+            f"{base_name}.npy",
+        ]
+
+        for cand in candidate_names:
+            candidate_path = os.path.join(self.edge_root, base_dir, cand)
+            if os.path.exists(candidate_path):
+                return candidate_path
+        return None
+
+    def _load_edge_from_external(self, image_path):
+        """Load a single-channel edge tensor from an external edge directory.
+
+        Falls back to on-the-fly edge extraction if no external edge is found.
+        """
+        edge_path = self._find_external_edge_path(image_path)
+        if edge_path is None:
+            # Fallback: compute edges from the RGB image
+            rgb_image = Image.open(image_path).convert("RGB")
+            edges = extract_edges(rgb_image)
+            edges_pil = Image.fromarray(edges).convert("L")
+            return self.transform(edges_pil)
+
+        ext = os.path.splitext(edge_path)[1].lower()
+        if ext == ".npy":
+            edges = np.load(edge_path)
+            if edges.ndim == 3:
+                # If accidentaly saved with 3 channels, convert to gray
+                edges = cv2.cvtColor(edges, cv2.COLOR_RGB2GRAY)
+            edges = edges.astype(np.uint8)
+            edges_pil = Image.fromarray(edges).convert("L")
+        else:
+            # Image file
+            edges_pil = Image.open(edge_path)
+            # Ensure single-channel
+            if edges_pil.mode != "L":
+                edges_pil = edges_pil.convert("L")
+
+        return self.transform(edges_pil)
+
+    def _precompute_edges_from_external(self):
+        """Preload all edge tensors from the external edge directory into memory cache."""
+        for i, (seed_path, styled_path) in enumerate(
+            tqdm(self.data_pairs, desc="Loading external edges")
+        ):
+            seed_edges_tensor = self._load_edge_from_external(seed_path)
+            styled_edges_tensor = self._load_edge_from_external(styled_path)
             self.edge_cache[i] = (styled_edges_tensor, seed_edges_tensor)
 
     def __len__(self):

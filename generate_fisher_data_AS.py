@@ -15,6 +15,8 @@ from diffusers import (
 )
 
 from prompts.vangogh_prompts import vangogh_prompts
+from prompts.picasso_prompts import picasso_prompts
+from prompts.monet_prompts import monet_prompts
 
 
 def parse_args():
@@ -25,6 +27,12 @@ def parse_args():
     )
     parser.add_argument("--numbers_per_class", type=int, default=1000)
     parser.add_argument("--device", type=str, default="0,1")
+    parser.add_argument(
+        "--artist",
+        type=str,
+        choices=["vangogh", "picasso", "monet"],
+        default="vangogh",
+    )
 
     return parser.parse_args()
 
@@ -80,16 +88,16 @@ def extract_canny_edges(image, edge_threshold, edge_intensity, blur_radius):
     return edges_pil
 
 
-def create_directories(root_dir, numbers_per_class, num_prompts):
+def create_directories(root_dir, numbers_per_class, num_prompts, artist):
     if not os.path.exists(root_dir):
         os.mkdir(root_dir)
 
     # Create subdirectories
     total_images = numbers_per_class * num_prompts
-    forget_save_dir = os.path.join(root_dir, f"AS_forget_data2")
-    retain_save_dir = os.path.join(root_dir, f"AS_retain_data2")
-    comparison_save_dir = os.path.join(root_dir, f"AS_comparison_data2")
-    canny_save_dir = os.path.join(root_dir, f"AS_canny_edges2")
+    forget_save_dir = os.path.join(root_dir, f"AS_forget_data_{artist}")
+    retain_save_dir = os.path.join(root_dir, f"AS_retain_data_{artist}")
+    comparison_save_dir = os.path.join(root_dir, f"AS_comparison_data_{artist}")
+    canny_save_dir = os.path.join(root_dir, f"AS_canny_edges_{artist}")
 
     for directory in [
         forget_save_dir,
@@ -103,16 +111,43 @@ def create_directories(root_dir, numbers_per_class, num_prompts):
     return forget_save_dir, retain_save_dir, comparison_save_dir, canny_save_dir
 
 
-def clean_prompt_for_content(vangogh_prompt):
-    text = vangogh_prompt
+def clean_prompt_for_content(prompt, artist):
+    text = prompt
 
-    # Remove artist references (case-insensitive)
-    text = re.sub(r"\bby\s+vincent\s+van\s+gogh\b", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bvincent\s+van\s+gogh\b", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bvan\s+gogh\b", "", text, flags=re.IGNORECASE)
+    if artist == "vangogh":
+        # Remove Van Gogh references (case-insensitive)
+        text = re.sub(r"\bby\s+vincent\s+van\s+gogh\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bvincent\s+van\s+gogh\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bvan\s+gogh\b", "", text, flags=re.IGNORECASE)
+    elif artist == "picasso":
+        # Remove Picasso references (case-insensitive)
+        text = re.sub(r"\bby\s+pablo\s+picasso\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bpablo\s+picasso\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bpicasso\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bcubist\s+style\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bcubist\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\babstract\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bstyle\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\binspired\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bwith\s+geometric\s+shapes\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(
+            r"\bwith\s+fragmented\s+features\b", "", text, flags=re.IGNORECASE
+        )
+        text = re.sub(r"\bwith\s+distorted\s+features\b", "", text, flags=re.IGNORECASE)
+    elif artist == "monet":
+        # Remove Monet references (case-insensitive)
+        text = re.sub(r"\bby\s+claude\s+monet\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bclaude\s+monet\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bmonet\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bimpressionist\s+style\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bimpressionist\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bseries\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bin\s+\w+\s+light\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bat\s+sunset\b", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bin\s+fog\b", "", text, flags=re.IGNORECASE)
 
-    # Remove dangling 'by' at end if any
-    text = re.sub(r"\bby\b\s*$", "", text, flags=re.IGNORECASE)
+    # Remove dangling 'by', 'in', 'with' at end if any
+    text = re.sub(r"\b(by|in|with)\b\s*$", "", text, flags=re.IGNORECASE)
 
     # Tidy whitespace and trailing punctuation
     text = re.sub(r"\s{2,}", " ", text).strip()
@@ -133,15 +168,26 @@ def generate_forget_image(txt2img_pipeline, prompt, generator):
 
 
 def generate_retain_image(
-    controlnet_pipeline, canny_edges, vangogh_prompt, seed, device_1
+    controlnet_pipeline, canny_edges, prompt, seed, device_1, artist
 ):
-    content_prompt = clean_prompt_for_content(vangogh_prompt)
+    content_prompt = clean_prompt_for_content(prompt, artist)
     retain_prompt = f"A painting of {content_prompt}, realistic, high quality, detailed"
+
+    if artist == "vangogh":
+        negative_prompt = "Van Gogh style, brushstrokes, blurry, low quality"
+    elif artist == "picasso":
+        negative_prompt = "Picasso style, cubist, abstract, geometric, fragmented, blurry, low quality"
+    elif artist == "monet":
+        negative_prompt = (
+            "Monet style, impressionist, brushstrokes, soft focus, blurry, low quality"
+        )
+    else:
+        negative_prompt = "blurry, low quality"
 
     retain_image = controlnet_pipeline(
         prompt=retain_prompt,
         image=canny_edges,
-        negative_prompt="Van Gogh style, brushstrokes, blurry, low quality",
+        negative_prompt=negative_prompt,
         generator=torch.Generator(f"cuda:{device_1}").manual_seed(seed),
         guidance_scale=7.5,
         num_inference_steps=25,
@@ -183,22 +229,21 @@ def generate_paired_data(
     numbers_per_class,
     device_0,
     device_1,
+    artist,
 ):
     gen = torch.Generator(f"cuda:{device_0}")
 
-    for prompt_idx, vangogh_prompt in enumerate(
-        tqdm(prompts)
-    ):
+    for prompt_idx, artist_prompt in enumerate(tqdm(prompts)):
         for idx in range(numbers_per_class):
             gen.manual_seed(idx)
             torch.manual_seed(idx)
 
-            # Generate Van Gogh style image (forget data)
-            forget_image = generate_forget_image(txt2img_pipeline, vangogh_prompt, gen)
-            forget_filename = f"vangogh_{prompt_idx:02d}_{idx:04d}.png"
+            # Generate artist style image (forget data)
+            forget_image = generate_forget_image(txt2img_pipeline, artist_prompt, gen)
+            forget_filename = f"{artist}_{prompt_idx:02d}_{idx:04d}.png"
             forget_image.save(os.path.join(forget_save_dir, forget_filename))
 
-            # Extract very subtle Canny edges from Van Gogh image
+            # Extract very subtle Canny edges from artist image
             canny_edges = extract_canny_edges(
                 forget_image, edge_threshold=100, edge_intensity=1, blur_radius=1
             )
@@ -209,7 +254,7 @@ def generate_paired_data(
 
             # Generate style-removed image using ControlNet
             retain_image = generate_retain_image(
-                controlnet_pipeline, canny_edges, vangogh_prompt, idx, device_1
+                controlnet_pipeline, canny_edges, artist_prompt, idx, device_1, artist
             )
             retain_filename = f"realistic_{prompt_idx:02d}_{idx:04d}.png"
             retain_image.save(os.path.join(retain_save_dir, retain_filename))
@@ -230,14 +275,24 @@ def main():
         args.model_path, device_0, device_1
     )
 
+    # Select prompts based on artist
+    if args.artist == "vangogh":
+        prompts = vangogh_prompts
+    elif args.artist == "picasso":
+        prompts = picasso_prompts
+    elif args.artist == "monet":
+        prompts = monet_prompts
+    else:
+        raise ValueError(f"Unsupported artist: {args.artist}")
+
     root_dir = "./data/"
     forget_save_dir, retain_save_dir, comparison_save_dir, canny_save_dir = (
-        create_directories(root_dir, args.numbers_per_class, len(vangogh_prompts))
+        create_directories(root_dir, args.numbers_per_class, len(prompts), args.artist)
     )
 
     # Generate paired data
     generate_paired_data(
-        vangogh_prompts,
+        prompts,
         txt2img_pipeline,
         controlnet_pipeline,
         forget_save_dir,
@@ -247,8 +302,9 @@ def main():
         args.numbers_per_class,
         device_0,
         device_1,
+        args.artist,
     )
-    print(f"Van Gogh style data saved to: {forget_save_dir}")
+    print(f"{args.artist.capitalize()} style data saved to: {forget_save_dir}")
     print(f"Style-removed data saved to: {retain_save_dir}")
     print(f"Comparison data saved to: {comparison_save_dir}")
     print(f"Canny edges saved to: {canny_save_dir}")

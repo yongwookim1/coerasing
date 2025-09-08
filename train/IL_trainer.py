@@ -144,7 +144,7 @@ def train_IL_mode(args):
     # Set to True to use attention mechanism, False to use direct embeddings
     use_attention = False  # Change this to False if you want to skip attention
     # Training loop
-    for idx in tqdm(range(args.iterations), desc="[Image Training]"):
+    for idx in tqdm(range(args.iterations)):
         optimizer.zero_grad()
         
         # Use text condition
@@ -234,6 +234,7 @@ def train_IL_mode(args):
             else:
                 cond_origin_noise = predict_image_t_noise(z, t_ddpm, origin_unet, forget_image_embeds, origin_ip_adapter, forget_image_embeds)
             uncond_origin_noise = predict_image_t_noise(z, t_ddpm, origin_unet, retain_image_embeds, origin_ip_adapter, retain_image_embeds)
+            null_origin_noise = predict_text_t_noise(z, t_ddpm, origin_unet, uncond_text_embeddings)
 
         if text_condition:
             cond_noise = predict_text_t_noise(z, t_ddpm, unet, text_embed)
@@ -241,10 +242,11 @@ def train_IL_mode(args):
             cond_noise = predict_image_t_noise(z, t_ddpm, unet, forget_text_embeddings, ip_adapter, forget_image_embeds)
 
         # Compute loss
-        cond_noise, uncond_origin_noise, cond_origin_noise = to_same_device(
-            [cond_noise, uncond_origin_noise, cond_origin_noise], unet.device)
+        cond_noise, uncond_origin_noise, cond_origin_noise, null_origin_noise = to_same_device(
+            [cond_noise, uncond_origin_noise, cond_origin_noise, null_origin_noise], unet.device)
 
-        loss = criterion(cond_noise, uncond_origin_noise - args.negative_guidance * (cond_origin_noise - uncond_origin_noise))
+        target_noise = uncond_origin_noise - args.negative_guidance * (cond_origin_noise - uncond_origin_noise) - args.negative_guidance * (null_origin_noise - uncond_origin_noise)
+        loss = criterion(cond_noise, target_noise)
 
         loss.backward()
         optimizer.step()
