@@ -235,6 +235,8 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
         target_prompt = ["A painting of Van Gogh"] * 10
     elif target_prompt == "tench":
         target_prompt = ["A photo of a tench"] * 10
+    elif target_prompt == "church":
+        target_prompt = ["A photo of a church"] * 10
     elif target_prompt == "nudity":
         target_prompt = ["A photo of nudity"] * 10
     else:
@@ -298,6 +300,8 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
         target_prompt = ["A painting"] * 10
     elif target_prompt == "tench":
         target_prompt = ["A photo"] * 10
+    elif target_prompt == "church":
+        target_prompt = ["A photo of a church"] * 10
     elif target_prompt == "nudity":
         target_prompt = ["A photo of clothed person"] * 10
     else:
@@ -368,6 +372,131 @@ def compute_fisher_information(unet, vae, scheduler, tokenizer, text_encoder, de
     
     text_encoder.to(origin_text_encoder_device)
     return fisher_info
+
+
+def compute_pairwise_difference_fisher(
+    unet,
+    vae,
+    scheduler,
+    tokenizer,
+    text_encoder,
+    device,
+    pair_list,
+    module_names,
+    iterations: int = 30,
+):
+    """
+    Compute pairwise Fisher using the same logic as compute_fisher_information but for paired images.
+    FΔ[name] = E[(grad_f[name] - grad_r[name])^2]
+    pair_list: list of (forget_image_path, retain_image_path, prompt)
+    module_names: list of module names in UNet to collect Fisher for
+    """
+    # Move models to device
+    origin_text_encoder_device = text_encoder.device
+    text_encoder = text_encoder.to(device)
+    unet = unet.to(device)
+    vae = vae.to(device)
+    # Initialize Fisher information dictionaries
+    forget_fisher_info = {name: torch.zeros_like(dict(unet.named_modules())[name].weight) for name in module_names}
+    retain_fisher_info = {name: torch.zeros_like(dict(unet.named_modules())[name].weight) for name in module_names}
+    unet.eval()
+    vae.eval()
+    criteria = torch.nn.MSELoss()
+    print(f"Processing {len(pair_list)} image pairs")
+    transform = transforms.Compose([
+        transforms.Resize((512, 512)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5], [0.5])
+    ])
+    # Process each pair
+    for pair_idx, (forget_path, retain_path, prompt) in enumerate(tqdm(pair_list, desc='[Fisher - Pairwise Processing]')):
+        # Load images
+        forget_image = Image.open(forget_path).convert("RGB")
+        retain_image = Image.open(retain_path).convert("RGB")
+        forget_tensor = transform(forget_image).unsqueeze(0).to(device)
+        retain_tensor = transform(retain_image).unsqueeze(0).to(device)
+        # Process forget image
+        for i in range(iterations):
+            # Encode image to latent space
+            with torch.no_grad():
+                forget_latents = vae.encode(forget_tensor).latent_dist.sample()
+                forget_latents = forget_latents * vae.config.scaling_factor
+            # Sample random timestep
+            t = torch.randint(0, scheduler.config.num_train_timesteps, (1,), device=device).long()
+            # Add noise
+            noise = torch.randn_like(forget_latents)
+            noisy_latents = scheduler.add_noise(forget_latents, noise, t)
+            # Prepare text embeddings
+            text_tokens = tokenizer([prompt], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            text_embeddings = text_encoder(text_tokens.input_ids.to(device))[0]
+            unconditional_tokens = tokenizer([""], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            unconditional_embeddings = text_encoder(unconditional_tokens.input_ids.to(device))[0]
+            text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
+            # Duplicate for CFG
+            noisy_latents = torch.cat([noisy_latents] * 2)
+            t_batch = torch.cat([t] * 2)
+            noisy_latents.requires_grad = True
+            # Clear gradients
+            unet.zero_grad()
+            # Predict noise
+            noise_pred = unet(noisy_latents, t_batch, encoder_hidden_states=text_embeddings).sample
+            # Split CFG predictions
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            # Calculate loss with actual noise (only use text-conditioned prediction)
+            target_noise = torch.cat([noise] * 1)  # Only one copy for text-conditioned
+            loss = criteria(noise_pred_text, target_noise)
+            loss.backward()
+            for name in module_names:
+                module = dict(unet.named_modules())[name]
+                if hasattr(module, 'weight') and module.weight.grad is not None:
+                    forget_fisher_info[name] += module.weight.grad.data.pow(2)
+        # Process retain image
+        for i in range(iterations):
+            # Encode image to latent space
+            with torch.no_grad():
+                retain_latents = vae.encode(retain_tensor).latent_dist.sample()
+                retain_latents = retain_latents * vae.config.scaling_factor
+            # Sample random timestep
+            t = torch.randint(0, scheduler.config.num_train_timesteps, (1,), device=device).long()
+            # Add noise
+            noise = torch.randn_like(retain_latents)
+            noisy_latents = scheduler.add_noise(retain_latents, noise, t)
+            # Prepare text embeddings
+            text_tokens = tokenizer([prompt], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            text_embeddings = text_encoder(text_tokens.input_ids.to(device))[0]
+            unconditional_tokens = tokenizer([""], padding="max_length", max_length=tokenizer.model_max_length, truncation=True, return_tensors="pt")
+            unconditional_embeddings = text_encoder(unconditional_tokens.input_ids.to(device))[0]
+            text_embeddings = torch.cat([unconditional_embeddings, text_embeddings])
+            # Duplicate for CFG
+            noisy_latents = torch.cat([noisy_latents] * 2)
+            t_batch = torch.cat([t] * 2)
+            noisy_latents.requires_grad = True
+            # Clear gradients
+            unet.zero_grad()
+            # Predict noise
+            noise_pred = unet(noisy_latents, t_batch, encoder_hidden_states=text_embeddings).sample
+            # Split CFG predictions
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            # Calculate loss with actual noise (only use text-conditioned prediction)
+            target_noise = torch.cat([noise] * 1)  # Only one copy for text-conditioned
+            loss = criteria(noise_pred_text, target_noise)
+            loss.backward()
+            for name in module_names:
+                module = dict(unet.named_modules())[name]
+                if hasattr(module, 'weight') and module.weight.grad is not None:
+                    retain_fisher_info[name] += module.weight.grad.data.pow(2)
+    # Normalize Fisher information
+    total_iterations = iterations * len(pair_list)
+    for name in forget_fisher_info:
+        forget_fisher_info[name] /= total_iterations
+        retain_fisher_info[name] /= total_iterations
+    epsilon = 1e-8  # Small constant to avoid division by zero
+    fisher_info = {}
+    for name in module_names:
+        fisher_info[name] = forget_fisher_info[name] / (retain_fisher_info[name] + epsilon)
+    text_encoder.to(origin_text_encoder_device)
+    return fisher_info
+
 
 
 def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, scheduler=None, device=None, train_method='xattn', lora_rank=4, lora_alpha=1.0, lora_init_method=None, lora_init_prompt=None, fisher_loss='mse', forget_image_path=None, retain_image_path=None):

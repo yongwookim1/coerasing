@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument("--unet_checkpoint", type=str)
     parser.add_argument("--csv_path", type=str, default="prompts/coco_10k.csv")
     parser.add_argument(
-        "--coco10k_path", type=str, default="/home/dataset/coco2014/val2014"
+        "--coco10k_path", type=str, default="/home/dataset/coco_2014/val2014"
     )
     parser.add_argument("--output_path", type=str, default=None)
     parser.add_argument("--device", type=str, default="0")

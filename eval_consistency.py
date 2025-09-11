@@ -7,12 +7,15 @@ import torch
 import random
 from PIL import Image
 from tqdm import tqdm
+from skimage.metrics import structural_similarity as ssim
+import cv2
 
 from diffusers import StableDiffusionPipeline, DDIMScheduler
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 
 from prompts.nudity_prompts import nudity_prompts_100
 from prompts.tench_prompts import tench_prompts
+from prompts.church_prompts import church_prompts
 
 
 def parse_args():
@@ -24,7 +27,7 @@ def parse_args():
         default=None,
     )
     parser.add_argument("--output_path", type=str, default=None)
-    parser.add_argument("--target_concept", choices=["nudity", "tench"], default="tench", type=str)
+    parser.add_argument("--target_concept", choices=["nudity", "tench", "church"], default="tench", type=str)
     parser.add_argument("--device", type=str, default="0")
 
     args = parser.parse_args()
@@ -141,6 +144,40 @@ def calculate_dino_score_image_to_image(image_dir1, image_dir2, device):
     return mean_score, std_score
 
 
+def calculate_ssim_score_image_to_image(image_dir1, image_dir2):
+    """Calculate SSIM scores between pairs of images in two directories."""
+    ssim_scores = []
+    
+    # Get list of image files
+    image_files = sorted([
+        f for f in os.listdir(image_dir1) 
+        if f.lower().endswith((".png", ".jpg", ".jpeg"))
+    ])
+    
+    for image_file in tqdm(image_files):
+        path1 = os.path.join(image_dir1, image_file)
+        path2 = os.path.join(image_dir2, image_file)
+        
+        # Load images
+        image1 = cv2.imread(path1)
+        image2 = cv2.imread(path2)
+        
+        # Convert to grayscale for SSIM calculation
+        gray1 = cv2.cvtColor(image1, cv2.COLOR_BGR2GRAY)
+        gray2 = cv2.cvtColor(image2, cv2.COLOR_BGR2GRAY)
+        
+        # Calculate SSIM
+        score = ssim(gray1, gray2)
+        # Scale from [-1, 1] to [0, 100]
+        scaled_score = (score + 1) * 50.0
+        ssim_scores.append(scaled_score)
+    
+    mean_score = np.mean(ssim_scores)
+    std_score = np.std(ssim_scores)
+    
+    return mean_score, std_score
+
+
 def main():
     set_seed()
 
@@ -164,6 +201,8 @@ def main():
         prompts = nudity_prompts_100
     elif args.target_concept == "tench":
         prompts = tench_prompts
+    elif args.target_concept == "church":
+        prompts = church_prompts
 
     # Setup output directories
     generated_images_dir_original = os.path.join(
@@ -180,19 +219,28 @@ def main():
 
     generate_images(pipe_erased, prompts, generated_images_dir_erased, device)
 
-    # Calculate Image-to-Image DINO scores
-    dino_mean, dino_std = calculate_dino_score_image_to_image(
-        generated_images_dir_original, generated_images_dir_erased, device
-    )
+    # Calculate consistency scores based on target concept
+    if args.target_concept == "nudity":
+        # Use SSIM for nudity evaluation
+        mean_score, std_score = calculate_ssim_score_image_to_image(
+            generated_images_dir_original, generated_images_dir_erased
+        )
+        score_type = "SSIM"
+    else:
+        # Use DINO for other concepts
+        mean_score, std_score = calculate_dino_score_image_to_image(
+            generated_images_dir_original, generated_images_dir_erased, device
+        )
+        score_type = "DINO"
 
     # Print results
-    print(f"Consistency Score: {dino_mean:.2f} ± {dino_std:.2f}")
+    print(f"Consistency Score ({score_type}): {mean_score:.2f} ± {std_score:.2f}")
 
     # Save results to file
     results_file = os.path.join(output_path, "evaluation_results.txt")
     with open(results_file, "a") as f:
         f.write(f"Consistency Evaluation Results\n")
-        f.write(f"Consistency Score: {dino_mean:.2f} ± {dino_std:.2f}\n")
+        f.write(f"Consistency Score ({score_type}): {mean_score:.2f} ± {std_score:.2f}\n")
         f.write("")
 
     # Clean up GPU memory

@@ -3,18 +3,34 @@ from controlnet_aux import CannyDetector
 from diffusers import FluxControlPipeline
 from diffusers.utils import load_image
 import os
-exp_id = "0902_stylized"
+import random
+import numpy as np
+
+
+def set_seed():
+    seed = 42
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+exp_id = "0909_destylized"
+set_seed()
 pipe = FluxControlPipeline.from_pretrained("black-forest-labs/FLUX.1-Canny-dev", torch_dtype=torch.bfloat16).to("cuda:4")
-prompt = "A photo of cat"
+# prompt = "A photo of cat"
 # prompt = " "
-# prompt = "photorealistic, natural colors, high quality, detailed, realistic lighting"
+prompt = "photorealistic, natural colors, high quality, detailed, realistic lighting destylized van gogh painting"
 if "edge" in exp_id:
     control_image = load_image("/home/hyunsoo/coerasing/example/fix2fix_edge.jpg")
 elif "original" in exp_id:
     control_image = load_image("/home/hyunsoo/coerasing/example/img_original.png")
 else:
     # control_image = load_image("/home/hyunsoo/coerasing/example/img_stylized.png")
-    control_image = load_image("/home/kyw1654/coerasing/edges/cat_diffedge.png")
+    control_image = load_image("/home/kyw1654/coerasing/edges/vangogh_diffedge.png")
 # processor = CannyDetector()
 # low_lst = [10,20] #,30,40,50,60,70,80,90,100]
 # high_lst = [100,150,200]

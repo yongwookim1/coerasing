@@ -154,8 +154,9 @@ def train_IL_mode(args):
             text_embed = text_encoder(input_ids.to(origin_unet.device))[0].to(unet.device)
         
         else:
-            # Sample forget image embedding
-            forget_image_embeds = _sample_image_embedding(forget_image_list, image_encoder)
+            # Sample paired forget and retain image embeddings
+            forget_image_embeds, retain_image_embeds = _sample_paired_image_embeddings(
+                forget_image_list, retain_image_list, image_encoder)
 
             if use_attention:
                 forget_key = forget_text_embeddings
@@ -182,9 +183,6 @@ def train_IL_mode(args):
             if args.noise_factor > 0:
                 noise = torch.rand_like(forget_image_embeds)
                 forget_image_embeds = forget_image_embeds + args.noise_factor * noise
-            
-        # Sample retain image embedding
-        retain_image_embeds = _sample_image_embedding(retain_image_list, image_encoder)
 
         if use_attention:
             retain_key = retain_text_embeddings
@@ -269,8 +267,10 @@ def train_IL_mode(args):
 
 def _load_image_list(image_path, image_number):
     if os.path.isdir(image_path):
+        # Sort files to ensure consistent ordering across forget and retain lists
         all_images = [os.path.join(image_path, f) for f in os.listdir(image_path) if f.endswith(('png', 'jpg'))]
-        return random.sample(all_images, min(image_number, len(all_images)))
+        all_images.sort()  # Ensure consistent alphabetical ordering
+        return all_images[:image_number]  # Take first N images instead of random sampling
     else:
         return [image_path]
 
@@ -280,6 +280,30 @@ def _sample_image_embedding(image_list, image_encoder):
     image = Image.open(image_path).convert("RGB")
     image_tensor = transform(image).unsqueeze(0).to(image_encoder.device)
     return image_encoder(image_tensor).image_embeds
+
+
+def _sample_paired_image_embeddings(forget_image_list, retain_image_list, image_encoder):
+    # Use the minimum length to ensure valid pairing
+    max_pairs = min(len(forget_image_list), len(retain_image_list))
+    if max_pairs == 0:
+        raise ValueError("Either forget_image_list or retain_image_list is empty")
+    
+    # Sample the same index for both lists to maintain pairing
+    pair_idx = random.randint(0, max_pairs - 1)
+    
+    # Load forget image
+    forget_image_path = forget_image_list[pair_idx]
+    forget_image = Image.open(forget_image_path).convert("RGB")
+    forget_tensor = transform(forget_image).unsqueeze(0).to(image_encoder.device)
+    forget_embeds = image_encoder(forget_tensor).image_embeds
+    
+    # Load retain image (paired)
+    retain_image_path = retain_image_list[pair_idx]
+    retain_image = Image.open(retain_image_path).convert("RGB")
+    retain_tensor = transform(retain_image).unsqueeze(0).to(image_encoder.device)
+    retain_embeds = image_encoder(retain_tensor).image_embeds
+    
+    return forget_embeds, retain_embeds
 
 
 def _collect_contrastive_embeddings(args, image_encoder):

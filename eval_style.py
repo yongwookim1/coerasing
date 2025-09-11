@@ -23,8 +23,8 @@ def parse_args():
         help="Number of images to generate for evaluation",
     )
     parser.add_argument(
-        "--artist", type=str, choices=["vangogh", "picasso"], default="vangogh",
-        help="Artist style to evaluate (vangogh or picasso)"
+        "--artist", type=str, choices=["vangogh", "picasso", "monet"], default="vangogh",
+        help="Artist style to evaluate (vangogh, picasso, or monet)"
     )
 
     args = parser.parse_args()
@@ -69,6 +69,8 @@ def classify_image(image, model, processor, device, artist):
             target_class_number = 22  # Vincent Van Gogh class number
         elif artist == "picasso":
             target_class_number = 15  # Pablo Picasso class number
+        elif artist == "monet":
+            target_class_number = 12  # Claude Monet class number
         else:
             raise ValueError(f"Unsupported artist: {artist}")
             
@@ -145,10 +147,25 @@ def main():
         "A modernist composition by Picasso",
     ]
 
+    monet_prompts = [
+        "A painting in the style of Monet",
+        "A Monet style impressionist landscape",
+        "A water lily painting by Monet",
+        "A garden scene in Monet style",
+        "A cathedral painting by Monet",
+        "A haystack painting in Monet style",
+        "A bridge painting by Monet",
+        "A pond scene in Monet style",
+        "An impressionist artwork by Monet",
+        "A light study painting by Monet",
+    ]
+
     if args.artist == "vangogh":
         prompts = vangogh_prompts
     elif args.artist == "picasso":
         prompts = picasso_prompts
+    elif args.artist == "monet":
+        prompts = monet_prompts
     else:
         raise ValueError(f"Unsupported artist: {args.artist}")
 

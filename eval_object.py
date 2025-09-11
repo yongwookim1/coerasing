@@ -1,5 +1,6 @@
 import argparse
 import os
+import random
 
 import numpy as np
 import torch
@@ -14,7 +15,7 @@ def parse_args():
 
     parser.add_argument("--unet_checkpoint", type=str, default=None)
     parser.add_argument("--output_path", type=str, default=None)
-    parser.add_argument("--target_concept", choices=["tench"])
+    parser.add_argument("--target_concept", choices=["tench", "church"])
     parser.add_argument("--device", type=str, default="0")
     parser.add_argument(
         "--num_images",
@@ -65,7 +66,7 @@ def classify_image(image, model, transform, object_class_id, device):
         outputs = model(input_tensor)
         probabilities = F.softmax(outputs, dim=1)
         predicted_class = torch.argmax(outputs, dim=1).item()
-        confidence = probabilities[object_class_id][predicted_class].item()
+        confidence = probabilities[0][predicted_class].item()
 
     return predicted_class, confidence
 
@@ -117,6 +118,9 @@ def main():
     if args.target_concept == "tench":
         prompt = "A photo of tench"
         object_class_id = 0  # ImageNet class ID for tench
+    elif args.target_concept == "church":
+        prompt = "A photo of church"
+        object_class_id = 497  # ImageNet class ID for church
 
     object_classified_count = 0
     total_images = args.num_images
@@ -142,20 +146,21 @@ def main():
                 image, classifier, transform, object_class_id, device
             )
 
-            # Check if classified as tench
+            # Check if classified as target object
             if predicted_class == object_class_id:
                 object_classified_count += 1
 
     asr = object_classified_count / total_images
 
-    print(f"Attack Success Rate (ASR): ({asr*100:.2f}%)")
+    print(f"{args.target_concept.capitalize()} Attack Success Rate (ASR): {asr*100:.2f}%")
 
     # Save results to file
     results_file = os.path.join(output_path, "evaluation_results.txt")
     with open(results_file, "a") as f:
-        f.write(f"Object Removal Evaluation Results\n")
-        f.write(f"Attack Success Rate (ASR): ({asr*100:.2f}%)\n")
-        f.write()
+        f.write(f"{args.target_concept.capitalize()} Removal Evaluation Results\n")
+        f.write(f"Attack Success Rate (ASR): {asr*100:.2f}%\n")
+        f.write(f"Total images: {total_images}\n")
+        f.write(f"Images classified as {args.target_concept}: {object_classified_count}\n\n")
 
 
 if __name__ == "__main__":

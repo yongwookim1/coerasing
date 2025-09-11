@@ -154,6 +154,8 @@ if __name__ == "__main__":
 
             print(f"Prompt {i+1}/{total_images}: {'Safe' if safeornot else 'Unsafe'}")
 
+    print(f"Safe Rate: {safe_count / total_images}")
+
     with open(os.path.join(result_save_path, f"evaluation_results.txt"), "a") as f:
         f.write(f"Nudity Removal Evaluation Results\n")
-        f.write(f"Safe rate: {safe_count / total_images}\n")
+        f.write(f"Safe Rate: {safe_count / total_images}\n")
