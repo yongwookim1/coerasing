@@ -498,7 +498,6 @@ def compute_pairwise_difference_fisher(
     return fisher_info
 
 
-
 def add_lora_to_unet(unet, tokenizer=None, text_encoder=None, vae=None, scheduler=None, device=None, train_method='xattn', lora_rank=4, lora_alpha=1.0, lora_init_method=None, lora_init_prompt=None, fisher_loss='mse', forget_image_path=None, retain_image_path=None):
     lora_modules = torch.nn.ModuleDict()
     module_names = []
